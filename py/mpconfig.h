@@ -497,6 +497,14 @@
 #define MICROPY_OPT_CACHE_MAP_LOOKUP_IN_BYTECODE (0)
 #endif
 
+#ifndef MICROPY_OPT_VM_LOOKUP_CACHE_LEN
+#define MICROPY_OPT_VM_LOOKUP_CACHE_LEN (0)
+#endif
+
+#ifndef MICROPY_OPT_VM_LOOKUP_CACHE_LEN2
+#define MICROPY_OPT_VM_LOOKUP_CACHE_LEN2 (0)
+#endif
+
 // Whether to use fast versions of bitwise operations (and, or, xor) when the
 // arguments are both positive.  Increases Thumb2 code size by about 250 bytes.
 #ifndef MICROPY_OPT_MPZ_BITWISE

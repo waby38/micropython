@@ -181,21 +181,60 @@
 #endif // MICROPY_PY_SYS_SETTRACE
 
 #if MICROPY_OPT_CACHE_MAP_LOOKUP_IN_BYTECODE
-static inline mp_map_elem_t *mp_map_cached_lookup(mp_map_t *map, qstr qst, uint8_t *idx_cache) {
-    size_t idx = *idx_cache;
+
+// Inline caching
+#define USE_CACHE (1)
+#define CACHE_GET(ip, map, qst, key) (*(ip))
+#define CACHE_PUT(ip, map, qst, key, val) ((*(byte*)(ip)) = (val) & 0xff)
+#define CACHE_NEXT(ip) (++(ip))
+
+#elif MICROPY_OPT_VM_LOOKUP_CACHE_LEN
+
+// Global cache table
+#define USE_CACHE (1)
+#if 0
+// index with ip
+#define CACHE_GET(ip, map, qst, key) (MP_STATE_VM(vm_lookup_cache)[((uintptr_t)(ip)) % MICROPY_OPT_VM_LOOKUP_CACHE_LEN])
+#define CACHE_PUT(ip, map, qst, key, val) do { MP_STATE_VM(vm_lookup_cache)[((uintptr_t)(ip)) % MICROPY_OPT_VM_LOOKUP_CACHE_LEN] = (val) & 0xff; } while (0)
+#else
+// index with map+qst
+#define CACHE_GET(ip, map, qst, key) (MP_STATE_VM(vm_lookup_cache)[((uintptr_t)(map) + (uintptr_t)(qst)) % MICROPY_OPT_VM_LOOKUP_CACHE_LEN])
+#define CACHE_PUT(ip, map, qst, key, val) do { MP_STATE_VM(vm_lookup_cache)[((uintptr_t)(map) + (uintptr_t)(qst)) % MICROPY_OPT_VM_LOOKUP_CACHE_LEN] = (val) & 0xff; } while (0)
+#endif
+#define CACHE_NEXT(ip) do { } while (0)
+
+#elif MICROPY_OPT_VM_LOOKUP_CACHE_LEN2
+
+// Per-function cache table
+#define USE_CACHE (1)
+#define CACHE_GET(ip, map, qst, key) (code_state->fun_bc->lookup_cache[((uintptr_t)(ip)) % MICROPY_OPT_VM_LOOKUP_CACHE_LEN2])
+#define CACHE_PUT(ip, map, qst, key, val) do { code_state->fun_bc->lookup_cache[((uintptr_t)(ip)) % MICROPY_OPT_VM_LOOKUP_CACHE_LEN2] = (val) & 0xff; } while (0)
+#define CACHE_NEXT(ip) do { } while (0)
+
+#else
+
+// No caching
+#define USE_CACHE (0)
+
+#endif
+
+#if USE_CACHE
+static inline mp_map_elem_t *mp_map_cached_lookup(mp_code_state_t *code_state, mp_map_t *map, qstr qst, uint8_t *idx_cache) {
     mp_obj_t key = MP_OBJ_NEW_QSTR(qst);
+    size_t idx = CACHE_GET(idx_cache, map, qst, key);
     mp_map_elem_t *elem = NULL;
     if (idx < map->alloc && map->table[idx].key == key) {
         elem = &map->table[idx];
     } else {
         elem = mp_map_lookup(map, key, MP_MAP_LOOKUP);
         if (elem != NULL) {
-            *idx_cache = (elem - &map->table[0]) & 0xff;
+            CACHE_PUT(idx_cache, map, qst, key, elem - &map->table[0]);
         }
     }
     return elem;
 }
 #endif
+
 
 // fastn has items in reverse order (fastn[0] is local[0], fastn[-1] is local[1], etc)
 // sp points to bottom of stack which grows up
@@ -361,7 +400,7 @@ dispatch_loop:
                     goto load_check;
                 }
 
-                #if !MICROPY_OPT_CACHE_MAP_LOOKUP_IN_BYTECODE
+                #if !USE_CACHE
                 ENTRY(MP_BC_LOAD_NAME): {
                     MARK_EXC_IP_SELECTIVE();
                     DECODE_QSTR;
@@ -372,7 +411,7 @@ dispatch_loop:
                 ENTRY(MP_BC_LOAD_NAME): {
                     MARK_EXC_IP_SELECTIVE();
                     DECODE_QSTR;
-                    mp_map_elem_t *elem = mp_map_cached_lookup(&mp_locals_get()->map, qst, (uint8_t*)ip);
+                    mp_map_elem_t *elem = mp_map_cached_lookup(code_state, &mp_locals_get()->map, qst, (uint8_t*)ip);
                     mp_obj_t obj;
                     if (elem != NULL) {
                         obj = elem->value;
@@ -380,12 +419,12 @@ dispatch_loop:
                         obj = mp_load_name(qst);
                     }
                     PUSH(obj);
-                    ip++;
+                    CACHE_NEXT(ip);
                     DISPATCH();
                 }
                 #endif
 
-                #if !MICROPY_OPT_CACHE_MAP_LOOKUP_IN_BYTECODE
+                #if !USE_CACHE
                 ENTRY(MP_BC_LOAD_GLOBAL): {
                     MARK_EXC_IP_SELECTIVE();
                     DECODE_QSTR;
@@ -396,7 +435,7 @@ dispatch_loop:
                 ENTRY(MP_BC_LOAD_GLOBAL): {
                     MARK_EXC_IP_SELECTIVE();
                     DECODE_QSTR;
-                    mp_map_elem_t *elem = mp_map_cached_lookup(&mp_globals_get()->map, qst, (uint8_t*)ip);
+                    mp_map_elem_t *elem = mp_map_cached_lookup(code_state, &mp_globals_get()->map, qst, (uint8_t*)ip);
                     mp_obj_t obj;
                     if (elem != NULL) {
                         obj = elem->value;
@@ -404,12 +443,12 @@ dispatch_loop:
                         obj = mp_load_global(qst);
                     }
                     PUSH(obj);
-                    ip++;
+                    CACHE_NEXT(ip);
                     DISPATCH();
                 }
                 #endif
 
-                #if !MICROPY_OPT_CACHE_MAP_LOOKUP_IN_BYTECODE
+                #if !USE_CACHE
                 ENTRY(MP_BC_LOAD_ATTR): {
                     FRAME_UPDATE();
                     MARK_EXC_IP_SELECTIVE();
@@ -426,7 +465,7 @@ dispatch_loop:
                     mp_map_elem_t *elem = NULL;
                     if (mp_obj_is_instance_type(mp_obj_get_type(top))) {
                         mp_obj_instance_t *self = MP_OBJ_TO_PTR(top);
-                        elem = mp_map_cached_lookup(&self->members, qst, (uint8_t*)ip);
+                        elem = mp_map_cached_lookup(code_state, &self->members, qst, (uint8_t*)ip);
                     }
                     mp_obj_t obj;
                     if (elem != NULL) {
@@ -435,7 +474,7 @@ dispatch_loop:
                         obj = mp_load_attr(top, qst);
                     }
                     SET_TOP(obj);
-                    ip++;
+                    CACHE_NEXT(ip);
                     DISPATCH();
                 }
                 #endif
@@ -494,7 +533,7 @@ dispatch_loop:
                     DISPATCH();
                 }
 
-                #if !MICROPY_OPT_CACHE_MAP_LOOKUP_IN_BYTECODE
+                #if !USE_CACHE
                 ENTRY(MP_BC_STORE_ATTR): {
                     FRAME_UPDATE();
                     MARK_EXC_IP_SELECTIVE();
@@ -517,7 +556,7 @@ dispatch_loop:
                     mp_obj_t top = TOP();
                     if (mp_obj_is_instance_type(mp_obj_get_type(top)) && sp[-1] != MP_OBJ_NULL) {
                         mp_obj_instance_t *self = MP_OBJ_TO_PTR(top);
-                        elem = mp_map_cached_lookup(&self->members, qst, (uint8_t*)ip);
+                        elem = mp_map_cached_lookup(code_state, &self->members, qst, (uint8_t*)ip);
                     }
                     if (elem != NULL) {
                         elem->value = sp[-1];
@@ -525,7 +564,7 @@ dispatch_loop:
                         mp_store_attr(sp[0], qst, sp[-1]);
                     }
                     sp -= 2;
-                    ip++;
+                    CACHE_NEXT(ip);
                     DISPATCH();
                 }
                 #endif

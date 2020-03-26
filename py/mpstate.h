@@ -216,6 +216,10 @@ typedef struct _mp_state_vm_t {
     #endif
     #endif
 
+    #if MICROPY_OPT_VM_LOOKUP_CACHE_LEN
+    uint8_t vm_lookup_cache[MICROPY_OPT_VM_LOOKUP_CACHE_LEN];
+    #endif
+
     // size of the emergency exception buf, if it's dynamically allocated
     #if MICROPY_ENABLE_EMERGENCY_EXCEPTION_BUF && MICROPY_EMERGENCY_EXCEPTION_BUF_SIZE == 0
     mp_int_t mp_emergency_exception_buf_size;
