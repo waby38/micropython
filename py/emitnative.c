@@ -2803,7 +2803,6 @@ STATIC void emit_native_yield(emit_t *emit, int kind) {
     if (emit->do_viper_types) {
         mp_raise_NotImplementedError(MP_ERROR_TEXT("native yield"));
     }
-    emit->scope->scope_flags |= MP_SCOPE_FLAG_GENERATOR;
 
     need_stack_settled(emit);
 

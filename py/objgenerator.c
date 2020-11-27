@@ -3,7 +3,7 @@
  *
  * The MIT License (MIT)
  *
- * Copyright (c) 2013-2019 Damien P. George
+ * Copyright (c) 2013-2020 Damien P. George
  * Copyright (c) 2014-2017 Paul Sokolovsky
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -29,6 +29,7 @@
 #include <assert.h>
 
 #include "py/runtime.h"
+#include "py/bc0.h"
 #include "py/bc.h"
 #include "py/objstr.h"
 #include "py/objgenerator.h"
@@ -62,6 +63,12 @@ STATIC mp_obj_t gen_wrap_call(mp_obj_t self_in, size_t n_args, size_t n_kw, cons
     mp_obj_gen_instance_t *o = m_new_obj_var(mp_obj_gen_instance_t, byte,
         n_state * sizeof(mp_obj_t) + n_exc_stack * sizeof(mp_exc_stack_t));
     o->base.type = &mp_type_gen_instance;
+
+    #if MICROPY_PY_ASYNC_AWAIT
+    if ((scope_flags & (MP_SCOPE_FLAG_ASYNC_DEF | MP_SCOPE_FLAG_GENERATOR)) == (MP_SCOPE_FLAG_ASYNC_DEF | MP_SCOPE_FLAG_GENERATOR)) {
+        o->base.type = &mp_type_agen_instance;
+    }
+    #endif
 
     o->pend_exc = mp_const_none;
     o->code_state.fun_bc = self_fun;
@@ -351,3 +358,75 @@ const mp_obj_type_t mp_type_gen_instance = {
     .iternext = gen_instance_iternext,
     .locals_dict = (mp_obj_dict_t *)&gen_instance_locals_dict,
 };
+
+/******************************************************************************/
+// async generator instance
+
+#if MICROPY_PY_ASYNC_AWAIT
+
+mp_vm_return_kind_t mp_obj_agen_resume(mp_obj_t self_in, mp_obj_t send_value, mp_obj_t throw_value, mp_obj_t *ret_val) {
+    mp_obj_gen_instance_t *self = MP_OBJ_TO_PTR(self_in);
+    mp_vm_return_kind_t ret_kind = mp_obj_gen_resume(self_in, send_value, throw_value, ret_val);
+    if (ret_kind == MP_VM_RETURN_NORMAL) {
+        // Reached the end of the async generator.
+        mp_raise_type(&mp_type_StopAsyncIteration);
+    } else if (ret_kind == MP_VM_RETURN_YIELD) {
+        if (*self->code_state.ip != MP_BC_YIELD_FROM) {
+            // "yield" in async generator.
+            ret_kind = MP_VM_RETURN_NORMAL;
+        }
+    }
+    return ret_kind;
+}
+
+STATIC mp_obj_t agen_resume_and_raise(mp_obj_t self_in, mp_obj_t send_value, mp_obj_t throw_value) {
+    mp_obj_t ret;
+    switch (mp_obj_agen_resume(self_in, send_value, throw_value, &ret)) {
+        case MP_VM_RETURN_NORMAL:
+        default:
+            // Optimize return w/o value in case generator is used in for loop
+            if (ret == mp_const_none || ret == MP_OBJ_STOP_ITERATION) {
+                return MP_OBJ_STOP_ITERATION;
+            } else {
+                nlr_raise(mp_obj_new_exception_arg1(&mp_type_StopIteration, ret));
+            }
+
+        case MP_VM_RETURN_YIELD:
+            return ret;
+
+        case MP_VM_RETURN_EXCEPTION:
+            nlr_raise(ret);
+    }
+}
+
+STATIC mp_obj_t agen_instance_iternext(mp_obj_t self_in) {
+    return agen_resume_and_raise(self_in, mp_const_none, MP_OBJ_NULL);
+}
+
+STATIC mp_obj_t agen_instance___aiter__(mp_obj_t self_in) {
+    return self_in;
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_1(agen_instance___aiter___obj, agen_instance___aiter__);
+
+STATIC mp_obj_t agen_instance___anext__(mp_obj_t self_in) {
+    return self_in;
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_1(agen_instance___anext___obj, agen_instance___anext__);
+
+STATIC const mp_rom_map_elem_t agen_instance_locals_dict_table[] = {
+    { MP_ROM_QSTR(MP_QSTR___aiter__), MP_ROM_PTR(&agen_instance___aiter___obj) },
+    { MP_ROM_QSTR(MP_QSTR___anext__), MP_ROM_PTR(&agen_instance___anext___obj) },
+};
+
+STATIC MP_DEFINE_CONST_DICT(agen_instance_locals_dict, agen_instance_locals_dict_table);
+
+const mp_obj_type_t mp_type_agen_instance = {
+    { &mp_type_type },
+    .name = MP_QSTR_async_generator,
+    .unary_op = mp_generic_unary_op,
+    .getiter = mp_identity_getiter,
+    .iternext = agen_instance_iternext,
+    .locals_dict = (mp_obj_dict_t *)&agen_instance_locals_dict,
+};
+
+#endif // MICROPY_PY_ASYNC_AWAIT

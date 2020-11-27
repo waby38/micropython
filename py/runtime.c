@@ -1282,6 +1282,12 @@ mp_vm_return_kind_t mp_resume(mp_obj_t self_in, mp_obj_t send_value, mp_obj_t th
         return mp_obj_gen_resume(self_in, send_value, throw_value, ret_val);
     }
 
+    #if MICROPY_PY_ASYNC_AWAIT
+    if (type == &mp_type_agen_instance) {
+        return mp_obj_agen_resume(self_in, send_value, throw_value, ret_val);
+    }
+    #endif
+
     if (type->iternext != NULL && send_value == mp_const_none) {
         mp_obj_t ret = type->iternext(self_in);
         *ret_val = ret;

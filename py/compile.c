@@ -923,7 +923,7 @@ STATIC void compile_decorated(compiler_t *comp, mp_parse_node_struct_t *pns) {
         mp_parse_node_struct_t *pns0 = (mp_parse_node_struct_t *)pns_body->nodes[0];
         body_name = compile_funcdef_helper(comp, pns0, emit_options);
         scope_t *fscope = (scope_t *)pns0->nodes[4];
-        fscope->scope_flags |= MP_SCOPE_FLAG_GENERATOR;
+        fscope->scope_flags |= MP_SCOPE_FLAG_ASYNC_DEF;
     #endif
     } else {
         assert(MP_PARSE_NODE_STRUCT_KIND(pns_body) == PN_classdef); // should be
@@ -1775,6 +1775,9 @@ STATIC void compile_with_stmt(compiler_t *comp, mp_parse_node_struct_t *pns) {
 }
 
 STATIC void compile_yield_from(compiler_t *comp) {
+    if (!(comp->scope_cur->scope_flags & MP_SCOPE_FLAG_ASYNC_DEF)) {
+        comp->scope_cur->scope_flags |= MP_SCOPE_FLAG_GENERATOR;
+    }
     EMIT_ARG(get_iter, false);
     EMIT_ARG(load_const_tok, MP_TOKEN_KW_NONE);
     EMIT_ARG(yield, MP_EMIT_YIELD_FROM);
@@ -1969,7 +1972,7 @@ STATIC void compile_async_stmt(compiler_t *comp, mp_parse_node_struct_t *pns) {
         // async def
         compile_funcdef(comp, pns0);
         scope_t *fscope = (scope_t *)pns0->nodes[4];
-        fscope->scope_flags |= MP_SCOPE_FLAG_GENERATOR;
+        fscope->scope_flags |= MP_SCOPE_FLAG_ASYNC_DEF;
     } else if (MP_PARSE_NODE_STRUCT_KIND(pns0) == PN_for_stmt) {
         // async for
         compile_async_for_stmt(comp, pns0);
@@ -2742,6 +2745,7 @@ STATIC void compile_yield_expr(compiler_t *comp, mp_parse_node_struct_t *pns) {
         compile_syntax_error(comp, (mp_parse_node_t)pns, MP_ERROR_TEXT("'yield' outside function"));
         return;
     }
+    comp->scope_cur->scope_flags |= MP_SCOPE_FLAG_GENERATOR;
     if (MP_PARSE_NODE_IS_NULL(pns->nodes[0])) {
         EMIT_ARG(load_const_tok, MP_TOKEN_KW_NONE);
         EMIT_ARG(yield, MP_EMIT_YIELD_VALUE);
@@ -2750,6 +2754,9 @@ STATIC void compile_yield_expr(compiler_t *comp, mp_parse_node_struct_t *pns) {
         pns = (mp_parse_node_struct_t *)pns->nodes[0];
         compile_node(comp, pns->nodes[0]);
         compile_yield_from(comp);
+        if (comp->scope_cur->scope_flags & MP_SCOPE_FLAG_ASYNC_DEF) {
+            compile_syntax_error(comp, (mp_parse_node_t)pns, MP_ERROR_TEXT("'yield from' inside async function"));
+        }
     } else {
         compile_node(comp, pns->nodes[0]);
         EMIT_ARG(yield, MP_EMIT_YIELD_VALUE);
@@ -2982,6 +2989,7 @@ tail_recursion:
         // no more nested if/for; compile inner expression
         compile_node(comp, pn_inner_expr);
         if (comp->scope_cur->kind == SCOPE_GEN_EXPR) {
+            comp->scope_cur->scope_flags |= MP_SCOPE_FLAG_GENERATOR;
             EMIT_ARG(yield, MP_EMIT_YIELD_VALUE);
             reserve_labels_for_native(comp, 1);
             EMIT(pop_top);

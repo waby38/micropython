@@ -166,6 +166,7 @@ mp_obj_t mp_make_function_from_raw_code(const mp_raw_code_t *rc, mp_obj_t def_ar
             if ((rc->scope_flags & MP_SCOPE_FLAG_GENERATOR) != 0) {
                 ((mp_obj_base_t *)MP_OBJ_TO_PTR(fun))->type = &mp_type_native_gen_wrap;
             }
+            assert((rc->scope_flags & MP_SCOPE_FLAG_ASYNC_DEF) == 0);
             break;
         #endif
         #if MICROPY_EMIT_INLINE_ASM
@@ -178,7 +179,7 @@ mp_obj_t mp_make_function_from_raw_code(const mp_raw_code_t *rc, mp_obj_t def_ar
             assert(rc->kind == MP_CODE_BYTECODE);
             fun = mp_obj_new_fun_bc(def_args, def_kw_args, rc->fun_data, rc->const_table);
             // check for generator functions and if so change the type of the object
-            if ((rc->scope_flags & MP_SCOPE_FLAG_GENERATOR) != 0) {
+            if ((rc->scope_flags & (MP_SCOPE_FLAG_GENERATOR | MP_SCOPE_FLAG_ASYNC_DEF)) != 0) {
                 ((mp_obj_base_t *)MP_OBJ_TO_PTR(fun))->type = &mp_type_gen_wrap;
             }
 
