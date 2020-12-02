@@ -26,11 +26,11 @@ class Stream:
         # TODO yield?
         self.s.close()
 
-    async def read(self, n):
+    def read(self, n):
         yield core._io_queue.queue_read(self.s)
         return self.s.read(n)
 
-    async def readexactly(self, n):
+    def readexactly(self, n):
         r = b""
         while n:
             yield core._io_queue.queue_read(self.s)
@@ -42,7 +42,7 @@ class Stream:
                 n -= len(r2)
         return r
 
-    async def readline(self):
+    def readline(self):
         l = b""
         while True:
             yield core._io_queue.queue_read(self.s)
@@ -54,7 +54,7 @@ class Stream:
     def write(self, buf):
         self.out_buf += buf
 
-    async def drain(self):
+    def drain(self):
         mv = memoryview(self.out_buf)
         off = 0
         while off < len(mv):
@@ -71,7 +71,7 @@ StreamWriter = Stream
 
 
 # Create a TCP stream connection to a remote host
-async def open_connection(host, port):
+def open_connection(host, port):
     from uerrno import EINPROGRESS
     import usocket as socket
 
@@ -103,7 +103,7 @@ class Server:
     async def wait_closed(self):
         await self.task
 
-    async def _serve(self, cb, host, port, backlog):
+    def _serve(self, cb, host, port, backlog):
         import usocket as socket
 
         ai = socket.getaddrinfo(host, port)[0]  # TODO this is blocking!
