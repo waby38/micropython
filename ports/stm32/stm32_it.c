@@ -531,6 +531,8 @@ void RTC_WKUP_IRQHandler(void) {
     IRQ_ENTER(RTC_WKUP_IRQn);
     #if defined(STM32H7A3xx) || defined(STM32H7A3xxQ) || defined(STM32H7B3xx) || defined(STM32H7B3xxQ)
     RTC->SR &= ~RTC_SR_WUTF; // clear wakeup interrupt flag
+    #elif defined(STM32WL)
+    RTC->SCR = RTC_SCR_CWUTF; // TODO
     #else
     RTC->ISR &= ~RTC_ISR_WUTF; // clear wakeup interrupt flag
     #endif

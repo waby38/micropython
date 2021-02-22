@@ -143,7 +143,7 @@ void powerctrl_check_enter_bootloader(void) {
     #endif
 }
 
-#if !defined(STM32F0) && !defined(STM32L0) && !defined(STM32WB)
+#if !defined(STM32F0) && !defined(STM32L0) && !defined(STM32WB) && !defined(STM32WL)
 
 typedef struct _sysclk_scaling_table_entry_t {
     uint16_t mhz;
@@ -534,9 +534,15 @@ set_clk:
     return 0;
 }
 
-#elif defined(STM32WB)
+#elif defined(STM32WB) || defined(STM32WL)
 
+#if defined(STM32WB)
 #include "stm32wbxx_ll_utils.h"
+#define FLASH_LATENCY_MAX LL_FLASH_LATENCY_3
+#else
+#include "stm32wlxx_ll_utils.h"
+#define FLASH_LATENCY_MAX LL_FLASH_LATENCY_2
+#endif
 
 #define LPR_THRESHOLD (2000000)
 #define VOS2_THRESHOLD (16000000)
@@ -597,8 +603,8 @@ int powerctrl_set_sysclk(uint32_t sysclk, uint32_t ahb, uint32_t apb1, uint32_t 
     } else if (sysclk_mode == SYSCLK_MODE_MSI) {
         // Set flash latency to maximum to ensure the latency is large enough for
         // both the current SYSCLK and the SYSCLK that will be selected below.
-        LL_FLASH_SetLatency(LL_FLASH_LATENCY_3);
-        while (LL_FLASH_GetLatency() != LL_FLASH_LATENCY_3) {
+        LL_FLASH_SetLatency(FLASH_LATENCY_MAX);
+        while (LL_FLASH_GetLatency() != FLASH_LATENCY_MAX) {
         }
 
         // Before changing the MSIRANGE value, if MSI is on then it must also be ready.
@@ -678,7 +684,7 @@ void powerctrl_enter_stop_mode(void) {
     __HAL_RCC_WAKEUPSTOP_CLK_CONFIG(RCC_STOP_WAKEUPCLOCK_MSI);
     #endif
 
-    #if !defined(STM32F0) && !defined(STM32L0) && !defined(STM32L4) && !defined(STM32WB)
+    #if !defined(STM32F0) && !defined(STM32L0) && !defined(STM32L4) && !defined(STM32WB) && !defined(STM32WL)
     // takes longer to wake but reduces stop current
     HAL_PWREx_EnableFlashPowerDown();
     #endif
@@ -757,7 +763,7 @@ void powerctrl_enter_stop_mode(void) {
     #if defined(STM32H7)
     while (__HAL_RCC_GET_SYSCLK_SOURCE() != RCC_CFGR_SWS_PLL1) {
     }
-    #elif defined(STM32WB)
+    #elif defined(STM32WB) || defined(STM32WL)
     while (__HAL_RCC_GET_SYSCLK_SOURCE() != RCC_SYSCLKSOURCE_STATUS_PLLCLK) {
     }
     #else
@@ -848,6 +854,10 @@ void powerctrl_enter_standby_mode(void) {
     // that if a source is active it does actually wake the device.
     // See section 5.3.7 of RM0090.
 
+    #if defined(STM32WL)
+    // TODO
+    #else
+
     // Note: we only support RTC ALRA, ALRB, WUT and TS.
     // TODO support TAMP and WKUP (PA0 external pin).
     #if defined(STM32F0) || defined(STM32L0)
@@ -909,6 +919,8 @@ void powerctrl_enter_standby_mode(void) {
     // Enable the internal (eg RTC) wakeup sources
     // See Errata 2.2.2 "Wakeup from Standby mode when the back-up SRAM regulator is enabled"
     PWR->CSR1 |= PWR_CSR1_EIWUP;
+    #endif
+
     #endif
 
     // enter standby mode
