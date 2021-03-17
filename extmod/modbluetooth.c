@@ -34,6 +34,7 @@
 #include "py/objarray.h"
 #include "py/qstr.h"
 #include "py/runtime.h"
+#include "py/stackctrl.h"
 #include "extmod/modbluetooth.h"
 #include <string.h>
 
@@ -1111,7 +1112,7 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_1(bluetooth_ble_invoke_irq_obj, bluetooth_ble_inv
 
 #if MICROPY_PY_BLUETOOTH_USE_SYNC_EVENTS
 
-STATIC mp_obj_t invoke_irq_handler(uint16_t event,
+STATIC mp_obj_t invoke_irq_handler_run(uint16_t event,
     const mp_int_t *numeric, size_t n_unsigned, size_t n_signed,
     const uint8_t *addr,
     const mp_obj_bluetooth_uuid_t *uuid,
@@ -1160,6 +1161,72 @@ STATIC mp_obj_t invoke_irq_handler(uint16_t event,
 
     return result;
 }
+
+#if MICROPY_PY_THREAD
+
+// If threading is enabled with BLE synchronous events then the BLE event callbacks
+// may occur on any system thread (including a MicroPython thread), and must be
+// synchronised with the rest of the MicroPython runtime.
+
+#if MICROPY_ENABLE_PYSTACK
+#error not supported
+#endif
+
+STATIC mp_obj_t invoke_irq_handler(uint16_t event,
+    const mp_int_t *numeric, size_t n_unsigned, size_t n_signed,
+    const uint8_t *addr,
+    const mp_obj_bluetooth_uuid_t *uuid,
+    const uint8_t **data, size_t *data_len, size_t n_data) {
+
+    // This code may run on an existing MicroPython thread, or a non-MicroPython thread
+    // that's not using the mp_thread_get_state() value.  In the former case the state
+    // must be restored once this callback finishes.
+    mp_state_thread_t *ts_orig = mp_thread_get_state();
+
+    mp_state_thread_t ts;
+    if (ts_orig == NULL) {
+        mp_thread_set_state(&ts);
+        mp_stack_set_top(&ts + 1); // need to include ts in root-pointer scan
+        mp_stack_set_limit(MICROPY_PY_BLUETOOTH_IRQ_STACK_SIZE - 1024);
+        ts.gc_lock_depth = 0;
+        ts.mp_pending_exception = MP_OBJ_NULL;
+        mp_locals_set(mp_state_ctx.thread.dict_locals); // set from the outer context
+        mp_globals_set(mp_state_ctx.thread.dict_globals); // set from the outer context
+        MP_THREAD_GIL_ENTER();
+    }
+
+    mp_obj_t result = mp_const_none;
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        result = invoke_irq_handler_run(event, numeric, n_unsigned, n_signed, addr, uuid, data, data_len, n_data);
+        nlr_pop();
+    } else {
+        // Uncaught exception, print it out.
+        mp_printf(MICROPY_ERROR_PRINTER, "Unhandled exception in IRQ callback handler\n");
+        mp_obj_print_exception(MICROPY_ERROR_PRINTER, MP_OBJ_FROM_PTR(nlr.ret_val));
+    }
+
+    if (ts_orig == NULL) {
+        MP_THREAD_GIL_EXIT();
+        mp_thread_set_state(ts_orig);
+    }
+
+    return result;
+}
+
+#else
+
+// Without threading, BLE event handlers can be called directly.
+
+STATIC mp_obj_t invoke_irq_handler(uint16_t event,
+    const mp_int_t *numeric, size_t n_unsigned, size_t n_signed,
+    const uint8_t *addr,
+    const mp_obj_bluetooth_uuid_t *uuid,
+    const uint8_t **data, size_t *data_len, size_t n_data) {
+    return invoke_irq_handler_run(event, numeric, n_unsigned, n_signed, addr, uuid, data, data_len, n_data);
+}
+
+#endif
 
 #define NULL_NUMERIC NULL
 #define NULL_ADDR NULL
