@@ -293,6 +293,7 @@ CI_UNIX_OPTS_SYS_SETTRACE_STACKLESS=(
     CFLAGS_EXTRA="-DMICROPY_STACKLESS=1 -DMICROPY_STACKLESS_STRICT=1 -DMICROPY_PY_SYS_SETTRACE=1"
 )
 
+# qemu-mips on GitHub Actions will seg-fault if not linked statically
 CI_UNIX_OPTS_QEMU_MIPS=(
     CROSS_COMPILE=mips-linux-gnu-
     VARIANT=coverage
@@ -500,16 +501,15 @@ function ci_unix_qemu_mips_setup {
 }
 
 function ci_unix_qemu_mips_build {
-    # qemu-mips on GitHub Actions will seg-fault if not linked statically
     ci_unix_build_helper "${CI_UNIX_OPTS_QEMU_MIPS[@]}"
 }
 
 function ci_unix_qemu_mips_run_tests {
     # Issues with MIPS tests:
     # - (i)listdir does not work, it always returns the empty list (it's an issue with the underlying C call)
-    # - ffi tests do not work
+    export QEMU_LD_PREFIX=/usr/mips-linux-gnu
     file ./ports/unix/micropython-coverage
-    (cd tests && MICROPY_MICROPYTHON=../ports/unix/micropython-coverage ./run-tests.py --exclude 'vfs_posix.py' --exclude 'ffi_(callback|float|float2).py')
+    (cd tests && MICROPY_MICROPYTHON=../ports/unix/micropython-coverage ./run-tests.py --exclude 'vfs_posix.py')
 }
 
 function ci_unix_qemu_arm_setup {
