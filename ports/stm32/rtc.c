@@ -339,11 +339,11 @@ STATIC HAL_StatusTypeDef PYB_RTC_Init(RTC_HandleTypeDef *hrtc) {
         hrtc->Instance->PRER |= (uint32_t)(hrtc->Init.AsynchPrediv << 16);
 
         // Exit Initialization mode
-        hrtc->Instance->ISR &= (uint32_t) ~RTC_ISR_INIT;
+        //hrtc->Instance->ISR &= (uint32_t) ~RTC_ISR_INIT;
 
         #if defined(STM32L0) || defined(STM32L4) || defined(STM32H7) || defined(STM32WB)
-        hrtc->Instance->OR &= (uint32_t) ~RTC_OR_ALARMOUTTYPE;
-        hrtc->Instance->OR |= (uint32_t)(hrtc->Init.OutPutType);
+        //hrtc->Instance->OR &= (uint32_t) ~RTC_OR_ALARMOUTTYPE;
+        //hrtc->Instance->OR |= (uint32_t)(hrtc->Init.OutPutType);
         #elif defined(STM32F7)
         hrtc->Instance->OR &= (uint32_t) ~RTC_OR_ALARMTYPE;
         hrtc->Instance->OR |= (uint32_t)(hrtc->Init.OutPutType);
@@ -693,8 +693,10 @@ mp_obj_t pyb_rtc_wakeup(size_t n_args, const mp_obj_t *args) {
     RTC->CR &= ~RTC_CR_WUTE;
 
     // wait until WUTWF is set
+    /*
     while (!(RTC->ISR & RTC_ISR_WUTWF)) {
     }
+    */
 
     if (enable) {
         // program WUT
@@ -721,7 +723,7 @@ mp_obj_t pyb_rtc_wakeup(size_t n_args, const mp_obj_t *args) {
         #endif
 
         // clear interrupt flags
-        RTC->ISR &= ~RTC_ISR_WUTF;
+        //RTC->ISR &= ~RTC_ISR_WUTF;
         #if defined(STM32L4) || defined(STM32WB)
         EXTI->PR1 = 1 << EXTI_RTC_WAKEUP;
         #elif defined(STM32H7)

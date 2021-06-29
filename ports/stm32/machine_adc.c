@@ -132,7 +132,7 @@ void adc_config(ADC_TypeDef *adc, uint32_t bits) {
     ADCx_COMMON->CCR = 0; // ADCPR=PCLK/2
     #elif defined(STM32H7)
     ADC12_COMMON->CCR = 3 << ADC_CCR_CKMODE_Pos;
-    ADC3_COMMON->CCR = 3 << ADC_CCR_CKMODE_Pos;
+    //ADC3_COMMON->CCR = 3 << ADC_CCR_CKMODE_Pos;
     #elif defined(STM32L0)
     ADC1_COMMON->CCR = 0; // ADCPR=PCLK/2
     #elif defined(STM32WB)
@@ -293,7 +293,8 @@ STATIC void adc_config_channel(ADC_TypeDef *adc, uint32_t channel, uint32_t samp
 
     #if defined(STM32H7)
     adc->PCSEL |= 1 << channel;
-    ADC_Common_TypeDef *adc_common = adc == ADC3 ? ADC3_COMMON : ADC12_COMMON;
+    //ADC_Common_TypeDef *adc_common = adc == ADC3 ? ADC3_COMMON : ADC12_COMMON;
+    ADC_Common_TypeDef *adc_common = ADC12_COMMON;
     #elif defined(STM32L4)
     ADC_Common_TypeDef *adc_common = ADCx_COMMON;
     #elif defined(STM32WB)
@@ -413,7 +414,7 @@ STATIC mp_obj_t machine_adc_make_new(const mp_obj_type_t *type, size_t n_args, s
         } else if (pin->adc_num & PIN_ADC2) {
             adc = ADC2;
         #endif
-        #if defined(ADC2)
+        #if defined(ADC3)
         } else if (pin->adc_num & PIN_ADC3) {
             adc = ADC3;
         #endif

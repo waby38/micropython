@@ -166,7 +166,7 @@ STATIC const uint8_t nvic_irq_channel[EXTI_NUM_VECTORS] = {
     #if defined(STM32H7)
     PVD_AVD_IRQn,
     RTC_Alarm_IRQn,
-    TAMP_STAMP_IRQn,
+    0,//TAMP_STAMP_IRQn,
     RTC_WKUP_IRQn,
     #elif defined(STM32WB)
     PVD_PVM_IRQn,

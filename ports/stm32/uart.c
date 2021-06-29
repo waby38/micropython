@@ -720,9 +720,9 @@ uint32_t uart_get_source_freq(pyb_uart_obj_t *self) {
     #elif defined(STM32H7)
     uint32_t csel;
     if (self->uart_id == 1 || self->uart_id == 6) {
-        csel = RCC->D2CCIP2R >> 3;
+        csel = 0; //RCC->D2CCIP2R >> 3;
     } else {
-        csel = RCC->D2CCIP2R;
+        csel = 0; //RCC->D2CCIP2R;
     }
     switch (csel & 3) {
         case 0:
