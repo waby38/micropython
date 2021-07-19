@@ -114,6 +114,7 @@ INC += -I$(TOP)/$(NIMBLE_LIB_DIR)/nimble/transport/uart/include
 INC += -I$(TOP)/$(NIMBLE_LIB_DIR)/porting/nimble/include
 
 $(BUILD)/$(NIMBLE_LIB_DIR)/%.o: CFLAGS += -Wno-maybe-uninitialized -Wno-pointer-arith -Wno-unused-but-set-variable -Wno-format -Wno-sign-compare -Wno-old-style-declaration
+$(BUILD)/$(NIMBLE_LIB_DIR)/porting/nimble/src/os_mempool.o: CFLAGS += -std=c11
 
 endif
 
