@@ -33,8 +33,6 @@
 
 #if MICROPY_PY_BLUETOOTH && MICROPY_BLUETOOTH_NIMBLE
 
-#define HCI_TRACE (0)
-
 static hal_uart_tx_cb_t hal_uart_tx_cb;
 static void *hal_uart_tx_arg;
 static hal_uart_rx_cb_t hal_uart_rx_cb;
@@ -65,13 +63,13 @@ void hal_uart_start_tx(uint32_t port) {
         mp_bluetooth_hci_cmd_buf[len++] = data;
     }
 
-    #if HCI_TRACE
-    printf("< [% 8d] %02x", (int)mp_hal_ticks_ms(), mp_bluetooth_hci_cmd_buf[0]);
-    for (size_t i = 1; i < len; ++i) {
-        printf(":%02x", mp_bluetooth_hci_cmd_buf[i]);
+    if (mp_bluetooth_trace_flags & MP_BLUETOOTH_TRACE_FLAG_HCI_TX) {
+        mp_printf(&mp_plat_print, "< [% 8d] %02x", (int)mp_hal_ticks_ms(), mp_bluetooth_hci_cmd_buf[0]);
+        for (size_t i = 1; i < len; ++i) {
+            mp_printf(&mp_plat_print, ":%02x", mp_bluetooth_hci_cmd_buf[i]);
+        }
+        mp_printf(&mp_plat_print, "\n");
     }
-    printf("\n");
-    #endif
 
     mp_bluetooth_hci_uart_write(mp_bluetooth_hci_cmd_buf, len);
 }
@@ -85,9 +83,9 @@ void mp_bluetooth_nimble_hci_uart_process(bool run_events) {
 
     int chr;
     while ((chr = mp_bluetooth_hci_uart_readchar()) >= 0) {
-        #if HCI_TRACE
-        printf("> %02x\n", chr);
-        #endif
+        if (mp_bluetooth_trace_flags & MP_BLUETOOTH_TRACE_FLAG_HCI_RX) {
+            mp_printf(&mp_plat_print, "> %02x\n", chr);
+        }
         hal_uart_rx_cb(hal_uart_rx_arg, chr);
 
         // Incoming data may result in events being enqueued. If we're in

@@ -27,6 +27,11 @@
 #ifndef MICROPY_INCLUDED_EXTMOD_MPBTHCI_H
 #define MICROPY_INCLUDED_EXTMOD_MPBTHCI_H
 
+#define MP_BLUETOOTH_TRACE_FLAG_HCI_TX (0x0001)
+#define MP_BLUETOOTH_TRACE_FLAG_HCI_RX (0x0002)
+
+extern uint32_t mp_bluetooth_trace_flags;
+
 // --- Optionally can be implemented by the driver. ---------------------------
 
 // Start/stop the HCI controller.

@@ -80,6 +80,8 @@ typedef struct {
 
 STATIC const mp_obj_type_t mp_type_bluetooth_ble;
 
+uint32_t mp_bluetooth_trace_flags;
+
 // TODO: this seems like it could be generic?
 STATIC mp_obj_t bluetooth_handle_errno(int err) {
     if (err != 0) {
@@ -409,6 +411,10 @@ STATIC mp_obj_t bluetooth_ble_config(size_t n_args, const mp_obj_t *args, mp_map
                         break;
                     }
                     #endif // MICROPY_PY_BLUETOOTH_ENABLE_PAIRING_BONDING
+                    case MP_QSTR_trace: {
+                        mp_bluetooth_trace_flags = mp_obj_get_int(e->value);
+                        break;
+                    }
                     default:
                         mp_raise_ValueError(MP_ERROR_TEXT("unknown config param"));
                 }
