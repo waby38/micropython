@@ -191,7 +191,7 @@ STATIC int do_repl(void) {
 
     input_restart:
         vstr_reset(&line);
-        int ret = readline(&line, ">>> ");
+        int ret = readline(&line, mp_repl_get_psx(MP_SYS_MUTABLE_PS1));
         mp_parse_input_kind_t parse_input_kind = MP_PARSE_SINGLE_INPUT;
 
         if (ret == CHAR_CTRL_C) {
@@ -238,7 +238,7 @@ STATIC int do_repl(void) {
             // got a line with non-zero length, see if it needs continuing
             while (mp_repl_continue_with_input(vstr_null_terminated_str(&line))) {
                 vstr_add_byte(&line, '\n');
-                ret = readline(&line, "... ");
+                ret = readline(&line, mp_repl_get_psx(MP_SYS_MUTABLE_PS2));
                 if (ret == CHAR_CTRL_C) {
                     // cancel everything
                     printf("\n");
@@ -263,13 +263,13 @@ STATIC int do_repl(void) {
     // use simple readline
 
     for (;;) {
-        char *line = prompt(">>> ");
+        char *line = prompt((char *)mp_repl_get_psx(MP_SYS_MUTABLE_PS1));
         if (line == NULL) {
             // EOF
             return 0;
         }
         while (mp_repl_continue_with_input(line)) {
-            char *line2 = prompt("... ");
+            char *line2 = prompt((char *)mp_repl_get_psx(MP_SYS_MUTABLE_PS2));
             if (line2 == NULL) {
                 break;
             }

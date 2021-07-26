@@ -184,6 +184,8 @@ MP_DEFINE_CONST_FUN_OBJ_1(mp_sys_settrace_obj, mp_sys_settrace);
 #endif // MICROPY_PY_SYS_SETTRACE
 
 STATIC const uint16_t sys_mutable_keys[] = {
+    MP_QSTR_ps1,
+    MP_QSTR_ps2,
     #if MICROPY_PY_SYS_STDFILES
     MP_QSTR_stdout,
     #endif

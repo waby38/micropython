@@ -41,6 +41,8 @@
 // variable, but in the future it is hoped that the state can become local.
 
 enum {
+    MP_SYS_MUTABLE_PS1,
+    MP_SYS_MUTABLE_PS2,
     #if MICROPY_PY_SYS_STDFILES
     MP_SYS_MUTABLE_STDOUT,
     #endif

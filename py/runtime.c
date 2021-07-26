@@ -102,6 +102,8 @@ void mp_init(void) {
     mp_globals_set(&MP_STATE_VM(dict_main));
 
     // Default sys mutable attribute values.
+    MP_STATE_VM(sys_mutable[MP_SYS_MUTABLE_PS1]) = MP_OBJ_NEW_QSTR(MP_QSTR__gt__gt__gt__space_);
+    MP_STATE_VM(sys_mutable[MP_SYS_MUTABLE_PS2]) = MP_OBJ_NEW_QSTR(MP_QSTR__dot__dot__dot__space_);
     #if MICROPY_PY_SYS_STDFILES
     extern struct _mp_dummy_t mp_sys_stdout_obj;
     MP_STATE_VM(sys_mutable[MP_SYS_MUTABLE_STDOUT]) = MP_OBJ_FROM_PTR(&mp_sys_stdout_obj);

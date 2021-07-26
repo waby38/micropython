@@ -428,7 +428,7 @@ STATIC int pyexec_friendly_repl_process_char(int c) {
 
         vstr_add_byte(MP_STATE_VM(repl_line), '\n');
         repl.cont_line = true;
-        readline_note_newline("... ");
+        readline_note_newline(mp_repl_get_psx(MP_SYS_MUTABLE_PS2));
         return 0;
 
     } else {
@@ -449,7 +449,7 @@ STATIC int pyexec_friendly_repl_process_char(int c) {
 
         if (mp_repl_continue_with_input(vstr_null_terminated_str(MP_STATE_VM(repl_line)))) {
             vstr_add_byte(MP_STATE_VM(repl_line), '\n');
-            readline_note_newline("... ");
+            readline_note_newline(mp_repl_get_psx(MP_SYS_MUTABLE_PS2));
             return 0;
         }
 
@@ -463,7 +463,7 @@ STATIC int pyexec_friendly_repl_process_char(int c) {
         vstr_reset(MP_STATE_VM(repl_line));
         repl.cont_line = false;
         repl.paste_mode = false;
-        readline_init(MP_STATE_VM(repl_line), ">>> ");
+        readline_init(MP_STATE_VM(repl_line), mp_repl_get_psx(MP_SYS_MUTABLE_PS1));
         return 0;
     }
 }
@@ -593,7 +593,7 @@ friendly_repl_reset:
         }
 
         vstr_reset(&line);
-        int ret = readline(&line, ">>> ");
+        int ret = readline(&line, mp_repl_get_psx(MP_SYS_MUTABLE_PS1));
         mp_parse_input_kind_t parse_input_kind = MP_PARSE_SINGLE_INPUT;
 
         if (ret == CHAR_CTRL_A) {
@@ -646,7 +646,7 @@ friendly_repl_reset:
             // got a line with non-zero length, see if it needs continuing
             while (mp_repl_continue_with_input(vstr_null_terminated_str(&line))) {
                 vstr_add_byte(&line, '\n');
-                ret = readline(&line, "... ");
+                ret = readline(&line, mp_repl_get_psx(MP_SYS_MUTABLE_PS2));
                 if (ret == CHAR_CTRL_C) {
                     // cancel everything
                     mp_hal_stdout_tx_str("\r\n");

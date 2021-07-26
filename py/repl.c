@@ -33,6 +33,14 @@
 
 #if MICROPY_HELPER_REPL
 
+const char *mp_repl_get_psx(int value) {
+    if (mp_obj_is_str(MP_STATE_VM(sys_mutable)[value])) {
+        return mp_obj_str_get_str(MP_STATE_VM(sys_mutable)[value]);
+    } else {
+        return "";
+    }
+}
+
 STATIC bool str_startswith_word(const char *str, const char *head) {
     size_t i;
     for (i = 0; str[i] && head[i]; i++) {

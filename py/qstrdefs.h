@@ -39,6 +39,8 @@ Q()
 Q(*)
 Q(_)
 Q(/)
+Q(>>> )
+Q(... )
 #if MICROPY_PY_BUILTINS_STR_OP_MODULO
 Q(%#o)
 Q(%#x)

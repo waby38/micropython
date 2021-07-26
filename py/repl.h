@@ -31,6 +31,7 @@
 #include "py/mpprint.h"
 
 #if MICROPY_HELPER_REPL
+const char *mp_repl_get_psx(int value);
 bool mp_repl_continue_with_input(const char *input);
 size_t mp_repl_autocomplete(const char *str, size_t len, const mp_print_t *print, const char **compl_str);
 #endif
