@@ -41,7 +41,7 @@
 // variable, but in the future it is hoped that the state can become local.
 
 enum {
-    MP_SYS_MUTABLE_,
+    MP_SYS_MUTABLE_TRACEBACKLIMIT,
     MP_SYS_MUTABLE_NUM,
 };
 

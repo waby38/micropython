@@ -569,6 +569,16 @@ void mp_obj_exception_clear_traceback(mp_obj_t self_in) {
     self->traceback_data = NULL;
 }
 
+bool mp_obj_exception_need_traceback(mp_obj_t self_in) {
+    mp_obj_exception_t *self = get_native_exception(self_in);
+    mp_int_t max_traceback = MP_OBJ_SMALL_INT_VALUE(MP_STATE_VM(sys_mutable[MP_SYS_MUTABLE_TRACEBACKLIMIT]));
+    if (max_traceback < 0) {
+        return true;
+    } else {
+        return self->traceback_len < max_traceback * TRACEBACK_ENTRY_LEN;
+    }
+}
+
 void mp_obj_exception_add_traceback(mp_obj_t self_in, qstr file, size_t line, qstr block) {
     mp_obj_exception_t *self = get_native_exception(self_in);
 

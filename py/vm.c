@@ -1460,6 +1460,7 @@ unwind_loop:
             // - constant GeneratorExit object, because it's const
             // - exceptions re-raised by END_FINALLY
             // - exceptions re-raised explicitly by "raise"
+            if (mp_obj_exception_need_traceback(MP_OBJ_FROM_PTR(nlr.ret_val))) {
             if (nlr.ret_val != &mp_const_GeneratorExit_obj
                 && *code_state->ip != MP_BC_END_FINALLY
                 && *code_state->ip != MP_BC_RAISE_LAST) {
@@ -1484,6 +1485,7 @@ unwind_loop:
                 #endif
                 size_t source_line = mp_bytecode_get_source_line(ip, bc);
                 mp_obj_exception_add_traceback(MP_OBJ_FROM_PTR(nlr.ret_val), source_file, source_line, block_name);
+            }
             }
 
             while (exc_sp >= exc_stack && exc_sp->handler <= code_state->ip) {
