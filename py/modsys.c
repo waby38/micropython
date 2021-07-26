@@ -50,6 +50,7 @@ extern struct _mp_dummy_t mp_sys_stdout_obj;
 extern struct _mp_dummy_t mp_sys_stderr_obj;
 
 #if MICROPY_PY_IO && MICROPY_PY_SYS_STDFILES
+// TODO: this won't be changed when writing to sys.stdout; does it need to be?
 const mp_print_t mp_sys_stdout_print = {&mp_sys_stdout_obj, mp_stream_write_adaptor};
 #endif
 
@@ -121,13 +122,12 @@ MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mp_sys_exit_obj, 0, 1, mp_sys_exit);
 
 STATIC mp_obj_t mp_sys_print_exception(size_t n_args, const mp_obj_t *args) {
     #if MICROPY_PY_IO && MICROPY_PY_SYS_STDFILES
-    void *stream_obj = &mp_sys_stdout_obj;
+    mp_obj_t stream_obj = MP_STATE_VM(sys_mutable)[MP_SYS_MUTABLE_STDOUT];
     if (n_args > 1) {
-        mp_get_stream_raise(args[1], MP_STREAM_OP_WRITE);
-        stream_obj = MP_OBJ_TO_PTR(args[1]);
+        stream_obj = args[1];
     }
-
-    mp_print_t print = {stream_obj, mp_stream_write_adaptor};
+    mp_get_stream_raise(stream_obj, MP_STREAM_OP_WRITE);
+    mp_print_t print = {MP_OBJ_TO_PTR(stream_obj), mp_stream_write_adaptor};
     mp_obj_print_exception(&print, args[0]);
     #else
     (void)n_args;
@@ -184,6 +184,9 @@ MP_DEFINE_CONST_FUN_OBJ_1(mp_sys_settrace_obj, mp_sys_settrace);
 #endif // MICROPY_PY_SYS_SETTRACE
 
 STATIC const uint16_t sys_mutable_keys[] = {
+    #if MICROPY_PY_SYS_STDFILES
+    MP_QSTR_stdout,
+    #endif
     MP_QSTR_tracebacklimit,
     MP_QSTRnull,
 };
@@ -234,7 +237,6 @@ STATIC const mp_rom_map_elem_t mp_module_sys_globals_table[] = {
 
     #if MICROPY_PY_SYS_STDFILES
     { MP_ROM_QSTR(MP_QSTR_stdin), MP_ROM_PTR(&mp_sys_stdin_obj) },
-    { MP_ROM_QSTR(MP_QSTR_stdout), MP_ROM_PTR(&mp_sys_stdout_obj) },
     { MP_ROM_QSTR(MP_QSTR_stderr), MP_ROM_PTR(&mp_sys_stderr_obj) },
     #endif
 

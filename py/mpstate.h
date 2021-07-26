@@ -41,6 +41,9 @@
 // variable, but in the future it is hoped that the state can become local.
 
 enum {
+    #if MICROPY_PY_SYS_STDFILES
+    MP_SYS_MUTABLE_STDOUT,
+    #endif
     MP_SYS_MUTABLE_TRACEBACKLIMIT,
     MP_SYS_MUTABLE_NUM,
 };

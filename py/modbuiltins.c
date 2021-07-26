@@ -403,7 +403,7 @@ STATIC mp_obj_t mp_builtin_print(size_t n_args, const mp_obj_t *pos_args, mp_map
         { MP_QSTR_sep, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_QSTR(MP_QSTR__space_)} },
         { MP_QSTR_end, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_QSTR(MP_QSTR__0x0a_)} },
         #if MICROPY_PY_IO && MICROPY_PY_SYS_STDFILES
-        { MP_QSTR_file, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_PTR(&mp_sys_stdout_obj)} },
+        { MP_QSTR_file, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
         #endif
     };
 
@@ -415,8 +415,12 @@ STATIC mp_obj_t mp_builtin_print(size_t n_args, const mp_obj_t *pos_args, mp_map
     mp_arg_parse_all(0, NULL, kw_args, MP_ARRAY_SIZE(allowed_args), allowed_args, u.args);
 
     #if MICROPY_PY_IO && MICROPY_PY_SYS_STDFILES
-    mp_get_stream_raise(u.args[ARG_file].u_obj, MP_STREAM_OP_WRITE);
-    mp_print_t print = {MP_OBJ_TO_PTR(u.args[ARG_file].u_obj), mp_stream_write_adaptor};
+    mp_obj_t file = u.args[ARG_file].u_obj;
+    if (file == mp_const_none) {
+        file = MP_STATE_VM(sys_mutable)[MP_SYS_MUTABLE_STDOUT];
+    }
+    mp_get_stream_raise(file, MP_STREAM_OP_WRITE);
+    mp_print_t print = {MP_OBJ_TO_PTR(file), mp_stream_write_adaptor};
     #endif
 
     // extract the objects first because we are going to use the other part of the union
