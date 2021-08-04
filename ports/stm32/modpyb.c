@@ -177,6 +177,7 @@ STATIC const mp_rom_map_elem_t pyb_module_globals_table[] = {
     #endif
     #endif
     #endif
+    { MP_ROM_QSTR(MP_QSTR_USBHost), MP_ROM_PTR(&pyb_usb_host_type) },
 
     #if MICROPY_PY_PYB_LEGACY
     { MP_ROM_QSTR(MP_QSTR_millis), MP_ROM_PTR(&mp_utime_ticks_ms_obj) },

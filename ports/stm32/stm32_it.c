@@ -323,7 +323,9 @@ void USB_LP_IRQHandler(void) {
 #if MICROPY_HW_USB_FS
 void OTG_FS_IRQHandler(void) {
     IRQ_ENTER(OTG_FS_IRQn);
-    HAL_PCD_IRQHandler(&pcd_fs_handle);
+    extern HCD_HandleTypeDef hhcd;
+    HAL_HCD_IRQHandler(&hhcd);
+    //HAL_PCD_IRQHandler(&pcd_fs_handle);
     IRQ_EXIT(OTG_FS_IRQn);
 }
 #endif

@@ -316,6 +316,7 @@ SRC_C += \
 	fdcan.c \
 	pyb_can.c \
 	usb.c \
+	usbhost.c \
 	wdt.c \
 	eth.c \
 	gccollect.c \
@@ -385,6 +386,7 @@ HAL_SRC_C += $(addprefix $(HAL_DIR)/Src/stm32$(MCU_SERIES)xx_,\
 	hal_flash.c \
 	hal_flash_ex.c \
 	hal_gpio.c \
+	hal_hcd.c \
 	hal_i2c.c \
 	hal_pcd.c \
 	hal_pcd_ex.c \

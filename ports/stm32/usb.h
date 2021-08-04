@@ -49,6 +49,7 @@ extern const struct _mp_rom_obj_tuple_t pyb_usb_hid_mouse_obj;
 extern const struct _mp_rom_obj_tuple_t pyb_usb_hid_keyboard_obj;
 extern const mp_obj_type_t pyb_usb_vcp_type;
 extern const mp_obj_type_t pyb_usb_hid_type;
+extern const mp_obj_type_t pyb_usb_host_type;
 
 MP_DECLARE_CONST_FUN_OBJ_KW(pyb_usb_mode_obj);
 MP_DECLARE_CONST_FUN_OBJ_0(pyb_have_cdc_obj); // deprecated
