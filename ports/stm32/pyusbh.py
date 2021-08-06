@@ -4,15 +4,20 @@ EVENT_CONNECTED = 1
 EVENT_PORT_ENABLED = 4
 
 USBH_EP_CONTROL = 0
+USBH_EP_INTERRUPT = 3
 USB_REQ_RECIPIENT_DEVICE = 0
 USB_REQ_TYPE_STANDARD = 0
+USB_REQ_TYPE_CLASS = 0x20
 USB_DESC_DEVICE = 0x0100
 USB_DESC_CONFIGURATION = 0x0200
 USB_DESC_STRING = 0x0300
 USB_H2D = 0x00
 USB_D2H = 0x80
+USB_REQ_GET_STATUS = 0x00
+USB_REQ_SET_FEATURE = 0x03
 USB_REQ_SET_ADDRESS = 0x05
 USB_REQ_GET_DESCRIPTOR = 0x06
+USB_REQ_SET_CONFIGURATION = 0x09
 USBH_PID_SETUP = 0
 USBH_PID_DATA = 1
 
@@ -24,6 +29,24 @@ USBH_URB_NYET = 3
 USBH_URB_ERROR = 4
 USBH_URB_STALL = 5
 
+# type of descriptor
+USB_DESC_TYPE_DEVICE         = 1
+USB_DESC_TYPE_CONFIGURATION  = 2
+USB_DESC_TYPE_STRING         = 3
+USB_DESC_TYPE_INTERFACE      = 4
+USB_DESC_TYPE_ENDPOINT       = 5
+
+_DFU_DNLOAD = 1
+_DFU_GETSTATUS = 3
+_DFU_CLRSTATUS = 4
+
+_DFU_STATE_DFU_DOWNLOAD_SYNC = 0x03
+_DFU_STATE_DFU_DOWNLOAD_BUSY = 0x04
+_DFU_STATE_DFU_DOWNLOAD_IDLE = 0x05
+_DFU_STATE_DFU_MANIFEST_SYNC = 0x06
+
+HUB_FEATURE_PORT_POWER     = 8
+
 class USBHost:
     def __init__(self, usbh, vbus):
         self.usbh = usbh
@@ -34,6 +57,7 @@ class USBHost:
         while True:
             yield asyncio.core._io_queue.queue_read(self.usbh)
             ev = self.usbh.event()
+            #print('event', ev)
             if ev & event:
                 return ev
 
@@ -48,13 +72,16 @@ class USBHost:
     def ctl_receive_data(self, buf, pipe):
         self.usbh.submit_urb(pipe, 1, USBH_EP_CONTROL, USBH_PID_DATA, buf, 0)
 
+    def int_in_data(self, pipe, buf):
+        self.usbh.submit_urb(pipe, 1, USBH_EP_INTERRUPT, USBH_PID_DATA, buf, 0)
+
     async def wait_urb(self, pipe, allowed_s=-1):
         while True:
             yield asyncio.core._io_queue.queue_read(self.usbh)
-            self.usbh.event()  # TODO: store event to self.event
+            ev = self.usbh.event()  # TODO: store event to self.event
             s = self.usbh.get_urb_state(pipe)
-            #print('wait_urb', pipe, s)
-            if s == USBH_URB_DONE or s == USBH_URB_ERROR or s == allowed_s or s == USBH_URB_NOTREADY:
+            #print('wait_urb', pipe, ev, s)
+            if s == USBH_URB_DONE or s == USBH_URB_ERROR or s == allowed_s:# or s == USBH_URB_NOTREADY:# or s == USBH_URB_STALL:
                 return s
 
     async def ctl_req(self, cmd, payload):
@@ -251,6 +278,9 @@ class USBHost:
         await self.ctl_req(cmd, payload)
         return payload
 
+    async def set_cfg(self, cfg=1):
+        await self.ctrl_transfer(USB_H2D | USB_REQ_RECIPIENT_DEVICE | USB_REQ_TYPE_STANDARD, USB_REQ_SET_CONFIGURATION, cfg, 0, None)
+
     async def dfu_clrstatus(self):
         await self.ctrl_transfer(0x21, _DFU_CLRSTATUS, 0, 0, None)
 
@@ -281,14 +311,32 @@ class USBHost:
             pass
 
 
-_DFU_DNLOAD = 1
-_DFU_GETSTATUS = 3
-_DFU_CLRSTATUS = 4
-
-_DFU_STATE_DFU_DOWNLOAD_SYNC = 0x03
-_DFU_STATE_DFU_DOWNLOAD_BUSY = 0x04
-_DFU_STATE_DFU_DOWNLOAD_IDLE = 0x05
-_DFU_STATE_DFU_MANIFEST_SYNC = 0x06
+def parse_cfg_descr(cfg_descr):
+    # length, type, total_len, num_itf, cfg_value, i_cfg, attr, max_power
+    cfg = struct.unpack_from("<BBHBBBBB", cfg_descr, 0)
+    offset = cfg[0]
+    assert cfg[1] == USB_DESC_TYPE_CONFIGURATION
+    print("Configuration", cfg)
+    while offset < len(cfg_descr):
+        # length, type, itfnum, alt, num_ep, itf_class, itf_subclass, itf_prot, i_itf
+        itf = struct.unpack_from("<BBBBBBBBB", cfg_descr, offset)
+        offset += itf[0]
+        assert itf[1] == USB_DESC_TYPE_INTERFACE
+        print("  Interface", itf)
+        found_ep = 0
+        while offset < len(cfg_descr) and cfg_descr[offset + 1] != USB_DESC_TYPE_INTERFACE:
+            l = cfg_descr[offset]
+            t = cfg_descr[offset + 1]
+            if t == USB_DESC_TYPE_ENDPOINT:
+                found_ep += 1
+                # length, type, ep_addr, attr, mps, interval
+                ep = struct.unpack_from("<BBBBHB", cfg_descr, offset)
+                print("    Endpoint", ep)
+            else:
+                print("    Unknown", l, t, cfg_descr[offset:offset + l])
+            offset += l
+        assert found_ep == itf[4]
+    assert offset == len(cfg_descr), (offset, len(cfg_descr))
 
 
 async def main():
@@ -298,6 +346,7 @@ async def main():
     usbh.usbh.init()
     usbh.usbh.start()
     usbh.vbus(1)
+    time.sleep_ms(200)
     await usbh.wait_event(EVENT_CONNECTED)
     time.sleep_ms(200)
     print('reset')
@@ -314,7 +363,7 @@ async def main():
     usbh.pipe_in = usbh.usbh.alloc_pipe(0x80)
     usbh.usbh.open_pipe(usbh.pipe_in, 0x80, dev_addr, usbh.dev_speed, USBH_EP_CONTROL, pipe_size)
     usbh.usbh.open_pipe(usbh.pipe_out, 0x00, dev_addr, usbh.dev_speed, USBH_EP_CONTROL, pipe_size)
-    print(usbh.dev_speed, usbh.pipe_out, usbh.pipe_in)
+    print("speed:", ("high", "full", "low")[usbh.dev_speed])
 
     # now go into enumeration
 
@@ -357,6 +406,7 @@ async def main():
     cfg_descr = bytearray(size)
     await usbh.get_cfg_descr(cfg_descr)
     print('cfg:', cfg_descr)
+    parse_cfg_descr(cfg_descr)
 
     # get imanuf string
     if dev_descr[10] != 0:
@@ -366,13 +416,46 @@ async def main():
     if dev_descr[12] != 0:
         print('iSerial:', await usbh.get_string_descr(dev_descr[12]))
 
-    print(await usbh.get_string_descr(4))
-    usbh.dfu_itf = 1  # TODO need to retrieve the correct itf number
-    print("dfu:", await usbh.dfu_get_status())
-    await usbh.dfu_clrstatus()
-    print("dfu:", await usbh.dfu_get_status())
+    # set configuration
+    await usbh.set_cfg()
 
-    await usbh.dfu_exit()
+    # USB DFU device
+    if 0:
+        print(await usbh.get_string_descr(4))
+        usbh.dfu_itf = 1  # TODO need to retrieve the correct itf number
+        print("dfu:", await usbh.dfu_get_status())
+        await usbh.dfu_clrstatus()
+        print("dfu:", await usbh.dfu_get_status())
+
+        await usbh.dfu_exit()
+
+    # USB Hub device
+    if 1:
+        hub_descr = bytearray(9)
+        await usbh.get_descr(USB_REQ_RECIPIENT_DEVICE | USB_REQ_TYPE_CLASS, 0, hub_descr)
+        hub_descr = struct.unpack("<BBBHBBBB", hub_descr)
+        print('hub descr:', hub_descr)
+
+        # why doesn't this work?
+        #pipe_int = usbh.usbh.alloc_pipe(129)
+        #usbh.usbh.open_pipe(pipe_int, 129, dev_addr, usbh.dev_speed, USBH_EP_INTERRUPT, 1)
+        #buf = bytearray(1)
+        #for _ in range(10):
+        #    usbh.int_in_data(pipe_int, buf)
+        #    await usbh.wait_urb(pipe_int)
+        #    print('int', buf)
+        #    await asyncio.sleep(0.5)
+
+        async def get_port_status():
+            for port in range(1, 5):
+                buf = await usbh.ctrl_transfer(USB_D2H | 3 | USB_REQ_TYPE_CLASS, USB_REQ_GET_STATUS, 0, port, bytearray(4))
+                print(port, struct.unpack("<HH", buf))
+
+        await get_port_status()
+
+        s = await usbh.ctrl_transfer(USB_H2D | 3 | USB_REQ_TYPE_CLASS, USB_REQ_SET_FEATURE, HUB_FEATURE_PORT_POWER, 1, None)
+
+        await get_port_status()
 
     time.sleep_ms(1000)
     usbh.vbus(0)
