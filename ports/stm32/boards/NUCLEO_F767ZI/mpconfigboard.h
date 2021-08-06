@@ -56,8 +56,8 @@ void NUCLEO_F767ZI_board_early_init(void);
 #define MICROPY_HW_SPI3_MOSI        (pin_B5)
 
 // CAN buses
-#define MICROPY_HW_CAN1_TX          (pin_D1)
-#define MICROPY_HW_CAN1_RX          (pin_D0)
+//#define MICROPY_HW_CAN1_TX          (pin_D1)
+//#define MICROPY_HW_CAN1_RX          (pin_D0)
 
 // USRSW is pulled low. Pressing the button makes the input go high.
 #define MICROPY_HW_USRSW_PIN        (pin_C13)

@@ -959,6 +959,27 @@ void dma_init_handle(DMA_HandleTypeDef *dma, const dma_descr_t *dma_descr, uint3
     dma->Parent = data;
 }
 
+uint32_t DMA_CalcBaseAndBitshift2(DMA_HandleTypeDef *hdma)
+{
+  uint32_t stream_number = (((uint32_t)hdma->Instance & 0xFFU) - 16U) / 24U;
+
+  /* lookup table for necessary bitshift of flags within status registers */
+  static const uint8_t flagBitshiftOffset[8U] = {0U, 6U, 16U, 22U, 0U, 6U, 16U, 22U};
+  hdma->StreamIndex = flagBitshiftOffset[stream_number];
+
+  if (stream_number > 3U)
+  {
+    /* return pointer to HISR and HIFCR */
+    hdma->StreamBaseAddress = (((uint32_t)hdma->Instance & (uint32_t)(~0x3FFU)) + 4U);
+  }
+  else
+  {
+    /* return pointer to LISR and LIFCR */
+    hdma->StreamBaseAddress = ((uint32_t)hdma->Instance & (uint32_t)(~0x3FFU));
+  }
+
+  return hdma->StreamBaseAddress;
+}
 void dma_init(DMA_HandleTypeDef *dma, const dma_descr_t *dma_descr, uint32_t dir, void *data) {
     // Some drivers allocate the DMA_HandleTypeDef from the stack
     // (i.e. dac, i2c, spi) and for those cases we need to clear the
@@ -1015,7 +1036,7 @@ void dma_init(DMA_HandleTypeDef *dma, const dma_descr_t *dma_descr, uint32_t dir
             #elif defined(STM32F4) || defined(STM32F7)
             // calculate DMA base address and bitshift to be used in IRQ handler
             extern uint32_t DMA_CalcBaseAndBitshift(DMA_HandleTypeDef *hdma);
-            DMA_CalcBaseAndBitshift(dma);
+            DMA_CalcBaseAndBitshift2(dma);
             #endif
         }
         #endif

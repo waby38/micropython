@@ -64,7 +64,7 @@ void HAL_HCD_Disconnect_Callback(HCD_HandleTypeDef *hhcd) {
     usb_host_signal_event(hhcd->pData, USBH_EVENT_DISCONNECT);
 }
 
-#if 0
+#if 1
 // These are used only by recent HAL versions.
 void HAL_HCD_PortEnabled_Callback(HCD_HandleTypeDef *hhcd) {
     usb_host_signal_event(hhcd->pData, USBH_EVENT_PORT_ENABLED);
