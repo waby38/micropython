@@ -271,7 +271,7 @@ class USBConnection:
     async def ctrl_transfer(self, bmRequestType, bRequest, wValue, wIndex, payload):
         wLength = len(payload) if payload else 0
         cmd = struct.pack("<BBHHH", bmRequestType, bRequest, wValue, wIndex, wLength)
-        await self.usbh.ctl_req(self.pipe_out, self.pipe_in, cmd, payload)
+        await asyncio.wait_for(self.usbh.ctl_req(self.pipe_out, self.pipe_in, cmd, payload), 2)
         return payload
 
     async def get_descr(self, req_type, val_idx, payload):
@@ -291,8 +291,7 @@ class USBConnection:
         self.dev_addr = addr
         bmRequestType = USB_H2D | USB_REQ_RECIPIENT_DEVICE | USB_REQ_TYPE_STANDARD
         bRequest = USB_REQ_SET_ADDRESS
-        cmd = struct.pack("<BBHHH", bmRequestType, bRequest, addr, 0, 0)
-        await self.usbh.ctl_req(self.pipe_out, self.pipe_in, cmd, None)
+        await self.ctrl_transfer(bmRequestType, bRequest, addr, 0, None)
 
     async def get_string_descr(self, idx):
         buf = bytearray(255)
@@ -395,7 +394,7 @@ class USBHub:
     async def poll_interrupt_endpoint(self):
         buf = bytearray(1)
         self.conn.usbh.int_in_data(self.pipe_int, buf)
-        await self.conn.usbh.wait_urb(self.pipe_int)
+        await asyncio.wait_for(self.conn.usbh.wait_urb(self.pipe_int, USBH_URB_IDLE), 2)
         return buf[0]
 
     async def get_descr(self):
@@ -508,8 +507,8 @@ async def handle_hub(conn):
 
     await hub.print_port_status()
 
-    for conn in conns:
-        await handle_dfu(conn)
+    #for conn in conns:
+    #    await handle_dfu(conn)
 
     await asyncio.sleep(0.5)
     await hub.print_port_status()
@@ -530,9 +529,18 @@ async def handle_dfu(conn):
 
 
 async def main():
-    machine.Pin("USB_DM", machine.Pin.ALT, alt=10)
-    machine.Pin("USB_DP", machine.Pin.ALT, alt=10)
-    usbh = USBHost(pyb.USBHost(), machine.Pin("OTG_FS_POWER", machine.Pin.OUT))
+    # Select VBUS pin (can be an unused pin if there is no VBUS)
+    #vbus = machine.Pin("OTG_FS_POWER", machine.Pin.OUT)
+    vbus = machine.Pin("X1")
+
+    # Create low-level USBHost object
+    # 0=FS, 1=HS port
+    usbh_ll = pyb.USBHost(1)
+
+    # Create high-level USBHost object
+    usbh = USBHost(usbh_ll, vbus)
+
+    # Initialise USBH bus
     usbh.usbh.init()
     usbh.usbh.start()
     usbh.vbus(1)
@@ -560,6 +568,6 @@ async def main():
     time.sleep_ms(1000)
     usbh.vbus(0)
     time.sleep_ms(100)
-    print(await usbh.wait_event(7))
+    #print(await usbh.wait_event(7))
 
 asyncio.run(main())
