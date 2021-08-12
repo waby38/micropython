@@ -86,9 +86,11 @@
 extern void __fatal_error(const char *);
 #if defined(MICROPY_HW_USB_FS)
 extern PCD_HandleTypeDef pcd_fs_handle;
+extern HCD_HandleTypeDef hcd_fs;
 #endif
 #if defined(MICROPY_HW_USB_HS)
 extern PCD_HandleTypeDef pcd_hs_handle;
+extern HCD_HandleTypeDef hcd_hs;
 #endif
 
 /******************************************************************************/
@@ -323,9 +325,10 @@ void USB_LP_IRQHandler(void) {
 #if MICROPY_HW_USB_FS
 void OTG_FS_IRQHandler(void) {
     IRQ_ENTER(OTG_FS_IRQn);
-    extern HCD_HandleTypeDef hhcd;
-    HAL_HCD_IRQHandler(&hhcd);
-    //HAL_PCD_IRQHandler(&pcd_fs_handle);
+    // These handlers have a check that the periph is in device/host mode.
+    // TODO maybe make this more efficient via a dynamic callback variable, eg usb_irq_handler(usb_handle)
+    HAL_PCD_IRQHandler(&pcd_fs_handle);
+    HAL_HCD_IRQHandler(&hcd_fs);
     IRQ_EXIT(OTG_FS_IRQn);
 }
 #endif
@@ -333,6 +336,7 @@ void OTG_FS_IRQHandler(void) {
 void OTG_HS_IRQHandler(void) {
     IRQ_ENTER(OTG_HS_IRQn);
     HAL_PCD_IRQHandler(&pcd_hs_handle);
+    HAL_HCD_IRQHandler(&hcd_hs);
     IRQ_EXIT(OTG_HS_IRQn);
 }
 #endif

@@ -24,7 +24,7 @@
  * THE SOFTWARE.
  */
 
-#include "softtimer.h"
+#include "py/mphal.h"
 #include "usb.h"
 #include "irq.h"
 
@@ -41,16 +41,60 @@ enum {
 void usb_host_signal_event(void *pyb_usb_host, int event);
 
 static uint32_t Pipes[USBH_MAX_PIPES_NBR];
-HCD_HandleTypeDef hhcd;
+#if MICROPY_HW_USB_FS
+HCD_HandleTypeDef hcd_fs;
+#endif
+#if MICROPY_HW_USB_HS
+HCD_HandleTypeDef hcd_hs;
+#endif
 
 void HAL_HCD_MspInit(HCD_HandleTypeDef *hhcd) {
-    __HAL_RCC_USB_OTG_FS_CLK_ENABLE();
-    NVIC_SetPriority(OTG_FS_IRQn, IRQ_PRI_OTG_FS);
-    HAL_NVIC_EnableIRQ(OTG_FS_IRQn);
+    #if MICROPY_HW_USB_FS
+    if (hhcd->Instance == USB_OTG_FS) {
+        const uint32_t otg_alt = GPIO_AF10_OTG_FS;
+        mp_hal_pin_config(pin_A11, MP_HAL_PIN_MODE_ALT, MP_HAL_PIN_PULL_NONE, otg_alt);
+        mp_hal_pin_config_speed(pin_A11, GPIO_SPEED_FREQ_VERY_HIGH);
+        mp_hal_pin_config(pin_A12, MP_HAL_PIN_MODE_ALT, MP_HAL_PIN_PULL_NONE, otg_alt);
+        mp_hal_pin_config_speed(pin_A12, GPIO_SPEED_FREQ_VERY_HIGH);
+
+        __HAL_RCC_USB_OTG_FS_CLK_ENABLE();
+
+        NVIC_SetPriority(OTG_FS_IRQn, IRQ_PRI_OTG_FS);
+        HAL_NVIC_EnableIRQ(OTG_FS_IRQn);
+    }
+    #endif
+
+    #if MICROPY_HW_USB_HS
+    if (hhcd->Instance == USB_OTG_HS) {
+        // Configure USB FS GPIOs
+        const uint32_t otg_alt = GPIO_AF12_OTG_HS_FS;
+        mp_hal_pin_config(pin_B14, MP_HAL_PIN_MODE_ALT, MP_HAL_PIN_PULL_NONE, otg_alt);
+        mp_hal_pin_config_speed(pin_B14, GPIO_SPEED_FREQ_VERY_HIGH);
+        mp_hal_pin_config(pin_B15, MP_HAL_PIN_MODE_ALT, MP_HAL_PIN_PULL_NONE, otg_alt);
+        mp_hal_pin_config_speed(pin_B15, GPIO_SPEED_FREQ_VERY_HIGH);
+
+        __HAL_RCC_USB_OTG_HS_ULPI_CLK_SLEEP_DISABLE();
+        __HAL_RCC_USB_OTG_HS_CLK_SLEEP_ENABLE();
+        __HAL_RCC_USB_OTG_HS_CLK_ENABLE();
+
+        NVIC_SetPriority(OTG_HS_IRQn, IRQ_PRI_OTG_HS);
+        HAL_NVIC_EnableIRQ(OTG_HS_IRQn);
+    }
+    #endif
 }
 
 void HAL_HCD_MspDeInit(HCD_HandleTypeDef *hhcd) {
-    __HAL_RCC_USB_OTG_FS_CLK_DISABLE();
+    #if MICROPY_HW_USB_FS
+    if (hhcd->Instance == USB_OTG_FS) {
+        __HAL_RCC_USB_OTG_FS_CLK_DISABLE();
+    }
+    #endif
+
+    #if MICROPY_HW_USB_HS
+    if (hhcd->Instance == USB_OTG_HS) {
+        __HAL_RCC_USB_OTG_HS_CLK_DISABLE();
+    }
+    #endif
 }
 
 void HAL_HCD_SOF_Callback(HCD_HandleTypeDef *hhcd) {
@@ -84,7 +128,11 @@ void PYB_USBH_Init(HCD_HandleTypeDef *hhcd) {
         Pipes[i] = 0;
     }
 
-    hhcd->Instance = USB_OTG_FS;
+    if (hhcd == &hcd_fs) {
+        hhcd->Instance = USB_OTG_FS;
+    } else {
+        hhcd->Instance = USB_OTG_HS;
+    }
     hhcd->Init.Host_channels = 11;
     hhcd->Init.dma_enable = 0;
     hhcd->Init.low_power_enable = 0;
@@ -113,7 +161,7 @@ uint8_t USBH_AllocPipe2(uint8_t ep_addr) {
 #include "py/runtime.h"
 #include "py/stream.h"
 
-#define MICROPY_HW_USB_HOST_NUM (1)
+#define MICROPY_HW_USB_HOST_NUM (2)
 
 typedef struct _pyb_usb_host_obj_t {
     mp_obj_base_t base;
@@ -130,8 +178,8 @@ void usb_host_signal_event(void *pyb_usb_host, int event) {
 }
 
 STATIC void pyb_usb_host_print(const mp_print_t *print, mp_obj_t self_in, mp_print_kind_t kind) {
-    int id = 0;
-    mp_printf(print, "USBHost(%u)", id);
+    pyb_usb_host_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    mp_printf(print, "USBHost(%u)", self - &pyb_usb_host_obj[0]);
 }
 
 STATIC mp_obj_t pyb_usb_host_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *args) {
@@ -144,7 +192,15 @@ STATIC mp_obj_t pyb_usb_host_make_new(const mp_obj_type_t *type, size_t n_args, 
 
     pyb_usb_host_obj_t *self = &pyb_usb_host_obj[id];
     self->base.type = &pyb_usb_host_type;
-    self->hhcd = &hhcd;
+    if (id == 0) {
+        self->hhcd = &hcd_fs;
+    #if MICROPY_HW_USB_HS
+    } else if (id == 1) {
+        self->hhcd = &hcd_hs;
+    #endif
+    } else {
+        mp_raise_ValueError(MP_ERROR_TEXT("USBHost doesn't exist"));
+    }
 
     return MP_OBJ_FROM_PTR(self);
 }
