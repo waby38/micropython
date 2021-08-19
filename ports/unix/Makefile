@@ -269,7 +269,7 @@ ifneq ($(FROZEN_MANIFEST)$(FROZEN_MPY_DIR),)
 CFLAGS += -DMICROPY_QSTR_EXTRA_POOL=mp_qstr_frozen_const_pool
 CFLAGS += -DMICROPY_MODULE_FROZEN_MPY
 CFLAGS += -DMPZ_DIG_SIZE=16 # force 16 bits to work on both 32 and 64 bit archs
-MPY_CROSS_FLAGS += -mcache-lookup-bc
+#MPY_CROSS_FLAGS += -mcache-lookup-bc
 endif
 
 ifneq ($(FROZEN_MANIFEST)$(FROZEN_DIR),)

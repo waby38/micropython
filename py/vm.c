@@ -29,6 +29,7 @@
 #include <string.h>
 #include <assert.h>
 
+#include "py/builtin.h"
 #include "py/emitglue.h"
 #include "py/objtype.h"
 #include "py/runtime.h"
@@ -416,7 +417,7 @@ dispatch_loop:
                     if (elem != NULL) {
                         obj = elem->value;
                     } else {
-                        obj = mp_load_name(qst);
+                        obj = mp_load_global(qst);
                     }
                     PUSH(obj);
                     CACHE_NEXT(ip);
@@ -436,6 +437,18 @@ dispatch_loop:
                     MARK_EXC_IP_SELECTIVE();
                     DECODE_QSTR;
                     mp_map_elem_t *elem = mp_map_cached_lookup(code_state, &mp_globals_get()->map, qst, (uint8_t*)ip);
+                    if (elem == NULL) {
+                        #if MICROPY_CAN_OVERRIDE_BUILTINS
+                        if (MP_STATE_VM(mp_module_builtins_override_dict) != NULL) {
+                            // lookup in additional dynamic table of builtins first
+                            // likely a small map and likely a miss, so don't use caching
+                            elem = mp_map_lookup(&MP_STATE_VM(mp_module_builtins_override_dict)->map, MP_OBJ_NEW_QSTR(qst), MP_MAP_LOOKUP);
+                        }
+                        #endif
+                        if (elem == NULL) {
+                            elem = mp_map_cached_lookup(code_state, (mp_map_t *)&mp_module_builtins_globals.map, qst, (uint8_t*)ip);
+                        }
+                    }
                     mp_obj_t obj;
                     if (elem != NULL) {
                         obj = elem->value;
@@ -482,8 +495,39 @@ dispatch_loop:
                 ENTRY(MP_BC_LOAD_METHOD): {
                     MARK_EXC_IP_SELECTIVE();
                     DECODE_QSTR;
+                    #if USE_CACHE && !MICROPY_OPT_CACHE_MAP_LOOKUP_IN_BYTECODE
+                    mp_obj_t top = TOP();
+                    mp_map_elem_t *elem = NULL;
+                    const mp_obj_type_t *type = mp_obj_get_type(top);
+                    // For instance types most of the load methods will be in
+                    // type->locals_dict, but need to first check self->members
+                    // in case they override.
+                    bool is_instance = mp_obj_is_instance_type(type);
+                    if (is_instance) {
+                        mp_obj_instance_t *self = MP_OBJ_TO_PTR(top);
+                        elem = mp_map_cached_lookup(code_state, &self->members, qst, (uint8_t*)ip);
+                        if (elem != NULL) {
+                            sp[0] = elem->value;
+                            sp[1] = MP_OBJ_NULL;
+                        }
+                    }
+                    if (elem == NULL && (is_instance || (type->attr == NULL && type->locals_dict != NULL))) {
+                        // TODO for instances, check self->base.type->flags & MP_TYPE_FLAG_HAS_SPECIAL_ACCESSORS
+                        elem = mp_map_cached_lookup(code_state, &type->locals_dict->map, qst, (uint8_t*)ip);
+                        if (elem != NULL) {
+                            sp[1] = MP_OBJ_NULL;
+                            mp_convert_member_lookup(top, type, elem->value, sp);
+                        }
+                    }
+                    if (elem == NULL) {
+                        mp_load_method(top, qst, sp);
+                    }
+                    CACHE_NEXT(ip);
+                    sp += 1;
+                    #else
                     mp_load_method(*sp, qst, sp);
                     sp += 1;
+                    #endif
                     DISPATCH();
                 }
 
