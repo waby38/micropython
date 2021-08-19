@@ -156,6 +156,7 @@ endif
 
 # Options for mpy-cross
 MPY_CROSS_FLAGS += -march=armv7m
+#MPY_CROSS_FLAGS += -mcache-lookup-bc
 
 SHARED_SRC_C += $(addprefix shared/,\
 	libc/string0.c \
