@@ -214,12 +214,18 @@ STATIC mp_obj_t pyb_usb_host_init_(size_t n_args, const mp_obj_t *pos_args, mp_m
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_KW(pyb_usb_host_init_obj, 1, pyb_usb_host_init_);
 
-STATIC mp_obj_t pyb_usb_host_start(mp_obj_t self_in) {
+STATIC mp_obj_t pyb_usb_host_start(mp_obj_t self_in, mp_obj_t phase_in) {
     pyb_usb_host_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    HAL_HCD_Start(self->hhcd);
+    //HAL_HCD_Start(self->hhcd);
+    int phase = mp_obj_get_int(phase_in);
+    if (phase == 0) {
+        __HAL_HCD_ENABLE(self->hhcd);
+    } else {
+        USB_DriveVbus(self->hhcd->Instance, 1);
+    }
     return mp_const_none;
 }
-STATIC MP_DEFINE_CONST_FUN_OBJ_1(pyb_usb_host_start_obj, pyb_usb_host_start);
+STATIC MP_DEFINE_CONST_FUN_OBJ_2(pyb_usb_host_start_obj, pyb_usb_host_start);
 
 STATIC mp_obj_t pyb_usb_host_reset(mp_obj_t self_in) {
     pyb_usb_host_obj_t *self = MP_OBJ_TO_PTR(self_in);

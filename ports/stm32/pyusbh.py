@@ -499,8 +499,9 @@ class USBDFU:
         assert status == _DFU_STATE_DFU_DOWNLOAD_IDLE, status
 
     async def _astart(self):
+        parse_cfg_descr(self.conn.cfg_descr)
         await self.conn.set_cfg()
-        print(await self.conn.get_string_descr(6))
+        #print(await self.conn.get_string_descr(6))
         self.dfu_itf = 1  # TODO need to retrieve the correct itf number
         await self._ensure_idle()
         await asyncio.sleep_ms(500)
@@ -629,8 +630,13 @@ class USBHostInterface:
 
     async def _astart(self):
         # Reset and initialise USBH bus
+        print("usbh_ll.init()")
         self.usbh_ll.init()
-        self.usbh_ll.start()
+        print("usbh_ll.start(0)")
+        self.usbh_ll.start(0)
+        print("usbh_ll.start(1)")
+        self.usbh_ll.start(1)
+        print("vbus(1)")
         self.vbus(1)
         time.sleep_ms(200)
         await self.usbh.wait_event(EVENT_CONNECTED)
