@@ -128,6 +128,7 @@ void PYB_USBH_Init(HCD_HandleTypeDef *hhcd) {
         Pipes[i] = 0;
     }
 
+    hhcd->Lock = HAL_UNLOCKED;
     if (hhcd == &hcd_fs) {
         hhcd->Instance = USB_OTG_FS;
     } else {

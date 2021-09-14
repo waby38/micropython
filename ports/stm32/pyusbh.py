@@ -1,5 +1,6 @@
 import os
 import machine, pyb, time, select, uasyncio as asyncio, struct
+import uctypes
 from collections import namedtuple
 
 EVENT_CONNECTED = 1
@@ -381,36 +382,51 @@ async def do_enum(usbh, dev_speed, verbose=False):
         if dev_descr[12] != 0:
             print("iSerial:", await conn.get_string_descr(conn.dev_descr[12]))
 
-        parse_cfg_descr(conn.cfg_descr)
+        parse_cfg_descr(conn.cfg_descr, print_cfg_descr_callback)
 
     return conn
 
 
-def parse_cfg_descr(cfg_descr):
-    # length, type, total_len, num_itf, cfg_value, i_cfg, attr, max_power
-    cfg = struct.unpack_from("<BBHBBBBB", cfg_descr, 0)
-    offset = cfg[0]
-    assert cfg[1] == USB_DESC_TYPE_CONFIGURATION
-    print("Configuration", cfg)
+def print_cfg_descr_callback(descr):
+    if descr[1] == USB_DESC_TYPE_CONFIGURATION:
+        # length, type, total_len, num_itf, cfg_value, i_cfg, attr, max_power
+        cfg = struct.unpack("<BBHBBBBB", descr)
+        print("Configuration", cfg)
+    elif descr[1] == USB_DESC_TYPE_INTERFACE:
+        # length, type, itfnum, alt, num_ep, itf_class, itf_subclass, itf_prot, i_itf
+        itf = struct.unpack("<BBBBBBBBB", descr)
+        print("  Interface", itf)
+    elif descr[1] == USB_DESC_TYPE_ENDPOINT:
+        # length, type, ep_addr, attr, mps, interval
+        ep = struct.unpack("<BBBBHB", descr)
+        print("    Endpoint", ep)
+    else:
+        print("    Unknown", descr[0], descr[1], descr)
+
+def parse_cfg_descr(cfg_descr, callback):
+    # length, type, total_len (uint16_t), num_itf, cfg_value, i_cfg, attr, max_power
+    l = cfg_descr[0]
+    t = cfg_descr[1]
+    assert t == USB_DESC_TYPE_CONFIGURATION
+    callback(cfg_descr[:l])
+    offset = l
     while offset < len(cfg_descr):
         # length, type, itfnum, alt, num_ep, itf_class, itf_subclass, itf_prot, i_itf
-        itf = struct.unpack_from("<BBBBBBBBB", cfg_descr, offset)
-        offset += itf[0]
-        assert itf[1] == USB_DESC_TYPE_INTERFACE
-        print("  Interface", itf)
+        l = cfg_descr[offset]
+        t = cfg_descr[offset + 1]
+        total_ep = cfg_descr[offset + 4]
+        assert t == USB_DESC_TYPE_INTERFACE
+        callback(cfg_descr[offset:offset + l])
+        offset += l
         found_ep = 0
         while offset < len(cfg_descr) and cfg_descr[offset + 1] != USB_DESC_TYPE_INTERFACE:
             l = cfg_descr[offset]
             t = cfg_descr[offset + 1]
             if t == USB_DESC_TYPE_ENDPOINT:
                 found_ep += 1
-                # length, type, ep_addr, attr, mps, interval
-                ep = struct.unpack_from("<BBBBHB", cfg_descr, offset)
-                print("    Endpoint", ep)
-            else:
-                print("    Unknown", l, t, cfg_descr[offset : offset + l])
+            callback(cfg_descr[offset:offset + l])
             offset += l
-        assert found_ep == itf[4]
+        assert found_ep == total_ep
     assert offset == len(cfg_descr), (offset, len(cfg_descr))
 
 
@@ -461,6 +477,30 @@ class USBHub:
 
 
 class USBDFU:
+    @staticmethod
+    def parse_memory_layout(s):
+        layout = []
+        s = s.split("/")
+        s.pop(0)
+        while s:
+            addr = int(s.pop(0), 16)
+            sectors = s.pop(0).split(",")
+            for sec in sectors:
+                num, size_type = sec.split("*")
+                num = int(num)
+                assert size_type[-1] == "g"
+                size = int(size_type[:-2])
+                if size_type[-2] == "K":
+                    size *= 1024
+                elif size_type[-2] == "M":
+                    size *= 1024 * 1024
+                else:
+                    assert 0
+                for _ in range(num):
+                    layout.append((addr, size))
+                    addr += size
+        return layout
+
     def __init__(self, conn):
         self.conn = conn
 
@@ -471,7 +511,7 @@ class USBDFU:
         await self.conn.ctrl_transfer(0x21, _DFU_CLRSTATUS, 0, 0, None)
 
     async def _get_status(self):
-        stat = await self.conn.ctrl_transfer(0xA1, _DFU_GETSTATUS, 0, self.dfu_itf, bytearray(6))
+        stat = await self.conn.ctrl_transfer(0xA1, _DFU_GETSTATUS, 0, self._dfu_itf, bytearray(6))
         # TODO stat[5] is optional string index for any error; print it out
         return stat[4]
 
@@ -487,34 +527,75 @@ class USBDFU:
                 await self._clrstatus()
 
     async def _upload(self, buf):
-        await self.conn.ctrl_transfer(0x80 | 0x21, _DFU_UPLOAD, 2, self.dfu_itf, buf)
+        await self.conn.ctrl_transfer(0x80 | 0x21, _DFU_UPLOAD, 2, self._dfu_itf, buf)
         status = await self._get_status()
         assert status == _DFU_STATE_DFU_UPLOAD_IDLE, status
 
     async def _dnload(self, a, b):
-        await self.conn.ctrl_transfer(0x21, _DFU_DNLOAD, a, self.dfu_itf, b)
+        await self.conn.ctrl_transfer(0x21, _DFU_DNLOAD, a, self._dfu_itf, b)
         status = await self._get_status()
         assert status == _DFU_STATE_DFU_DOWNLOAD_BUSY, status
         status = await self._get_status()
         assert status == _DFU_STATE_DFU_DOWNLOAD_IDLE, status
 
-    async def _astart(self):
-        parse_cfg_descr(self.conn.cfg_descr)
+    async def _set_addr(self, addr):
+        await self._dnload(0, struct.pack("<BI", 0x21, addr))
+
+    async def _page_erase(self, addr):
+        await self._dnload(0, struct.pack("<BI", 0x41, addr))
+
+    async def _write(self, addr, data):
+        mv = memoryview(data)
+        offset = 0
+        remain = len(data)
+        while remain:
+            print('x1', remain)
+            await self._set_addr(addr)
+            print('x2', remain)
+            l = min(self._transfer_size, remain)
+            print('x3', remain, l, offset)
+            await self._dnload(2, mv[offset : offset + l])
+            print('x4', remain, l, offset)
+            addr += l
+            offset += l
+            remain -= l
+            print(".", end="")
+
+    async def start(self):
+        self._dfu_itf = 1  # TODO need to retrieve the correct itf number
+        self._transfer_size = 512
+        self._memory_layout = None
+        def cfg_callback(descr):
+            nonlocal self
+            if descr[1] == USB_DESC_TYPE_INTERFACE:
+                if descr[5] == 0xFE and descr[6] == 0x01:
+                    # DFU interface; class=0xFE, subclass=0x01
+                    if self._memory_layout is None:
+                        self._memory_layout = descr[-1]
+            elif descr[0] == 9 and descr[1] == 0x21:
+                # DFU configuration descriptor
+                cfg = struct.unpack("<BBBHHH", descr)
+                print("DFU CFG", cfg)
+                #self._transfer_size = cfg[4]
+        parse_cfg_descr(self.conn.cfg_descr, cfg_callback)
+        if self._memory_layout is None:
+            raise Exception("could not find DFU interface")
         await self.conn.set_cfg()
-        #print(await self.conn.get_string_descr(6))
-        self.dfu_itf = 1  # TODO need to retrieve the correct itf number
+        self._memory_layout = self.parse_memory_layout(await self.conn.get_string_descr(self._memory_layout))
+        print(self._memory_layout)
         await self._ensure_idle()
         await asyncio.sleep_ms(500)
 
-    async def _aset_addr(self, addr):
-        await self._ensure_idle()
-        buf = struct.pack("<BI", 0x21, addr)
-        await self._dnload(0, buf)
-        await self._abort()
+    #async def set_addr(self, addr):
+    #    await self._ensure_idle()
+    #    buf = struct.pack("<BI", 0x21, addr)
+    #    await self.dnload(0, buf)
+    #    await self._abort()
 
-    async def _aexit(self):
-        await self._aset_addr(0x0800_0000)
-        await self.conn.ctrl_transfer(0x21, _DFU_DNLOAD, 0, self.dfu_itf, None)
+    async def exit_dfu(self):
+        await self._ensure_idle()
+        await self._set_addr(0x0800_0000)
+        await self.conn.ctrl_transfer(0x21, _DFU_DNLOAD, 0, self._dfu_itf, None)
         try:
             # Execute last command
             if await self._get_status() != _DFU_STATE_DFU_MANIFEST:
@@ -522,26 +603,34 @@ class USBDFU:
         except:
             pass
 
-    # Synchronous API
+    async def upload(self, addr, buf):
+        await self._set_addr(addr)
+        await self._abort()
+        status = await self._get_status()
+        assert status == _DFU_STATE_DFU_IDLE
+        await self._upload(buf)
+        await self._abort()
 
-    def start(self):
-        loop = asyncio.new_event_loop()
-        return loop.run_until_complete(self._astart())
-
-    def stop(self):
-        pass
-
-    def set_addr(self, addr):
-        loop = asyncio.new_event_loop()
-        return loop.run_until_complete(self._aset_addr(addr))
-
-    def exit(self):
-        loop = asyncio.new_event_loop()
-        return loop.run_until_complete(self._aexit())
-
-    def readinto(self, buf):
-        loop = asyncio.new_event_loop()
-        return loop.run_until_complete(self._upload(buf))
+    async def download(self, addr, data):
+        for mem_i in range(len(self._memory_layout)):
+            if self._memory_layout[mem_i][0] == addr:
+                break
+        else:
+            assert 0, "Write not aligned to a page"
+        mv = memoryview(data)
+        offset = 0
+        remain = len(data)
+        while remain:
+            l = min(self._memory_layout[mem_i][1], remain)
+            print("Erase 0x{:08x}".format(addr))
+            await self._page_erase(addr)
+            print("Write 0x{:08x} {} bytes".format(addr, l), end="")
+            await self._write(addr, mv[offset : offset + l])
+            print()
+            mem_i += 1
+            addr += l
+            offset += l
+            remain -= l
 
 
 async def handle_hub(conn):
@@ -616,8 +705,8 @@ usb_list_entry = namedtuple("usb_list_entry", ["addr", "vid", "pid", "product"])
 
 class USBHostInterface:
     # usb_id: 0=FS, 1=HS port
-    # vbus: VBUS pin (can be an unused pin if there is no VBUS)
-    def __init__(self, usb_id, vbus):
+    # vbus: VBUS pin (optional)
+    def __init__(self, usb_id, vbus=None):
         # Create low-level USBHost object
         self.usbh_ll = pyb.USBHost(usb_id)
 
@@ -625,18 +714,17 @@ class USBHostInterface:
         self.usbh = USBHost(self.usbh_ll)
 
         # Turn off VBUS
-        self.vbus = vbus
+        if vbus is None:
+            self.vbus = lambda x:None
+        else:
+            self.vbus = vbus
         self.vbus(0)
 
-    async def _astart(self):
+    async def start(self):
         # Reset and initialise USBH bus
-        print("usbh_ll.init()")
         self.usbh_ll.init()
-        print("usbh_ll.start(0)")
         self.usbh_ll.start(0)
-        print("usbh_ll.start(1)")
         self.usbh_ll.start(1)
-        print("vbus(1)")
         self.vbus(1)
         time.sleep_ms(200)
         await self.usbh.wait_event(EVENT_CONNECTED)
@@ -660,17 +748,13 @@ class USBHostInterface:
             # A device is connected to the root port
             self.conns = [conn_root]
 
-    def start(self):
-        loop = asyncio.new_event_loop()
-        loop.run_until_complete(self._astart())
-
     def stop(self):
         # Shut down
         self.vbus(0)
         time.sleep_ms(100)
         # print(await self.usbh.wait_event(7))
 
-    def _alist(self):
+    async def list(self):
         ls = []
         for conn in self.conns:
             vid = conn.dev_descr[7]
@@ -682,10 +766,6 @@ class USBHostInterface:
             ls.append(usb_list_entry(conn.dev_addr, vid, pid, prod))
         return ls
 
-    def list(self):
-        loop = asyncio.new_event_loop()
-        return loop.run_until_complete(self._alist())
-
     def get_device(self, addr):
         for conn in self.conns:
             if conn.dev_addr == addr:
@@ -693,36 +773,88 @@ class USBHostInterface:
         return None
 
 
-def main():
+class MemoryFile:
+    def __init__(self, addr, size):
+        self.data = memoryview(uctypes.bytearray_at(addr, size))
+        self.offset = 0
+
+    def unpack(self, fmt):
+        elems = struct.unpack_from(fmt, self.data, self.offset)
+        self.offset += struct.calcsize(fmt)
+        return elems
+
+    def read(self, size):
+        data = self.data[self.offset:self.offset + size]
+        self.offset += size
+        return data
+
+
+def dfu_read(file):
+    elems = []
+
+    sig, ver, size, num_targ = file.unpack("<5sBIB")
+    if not (sig == b"DfuSe" and ver == 1):
+        raise Exception(f"invalid firmware: {sig=} {ver=}")
+
+    for i in range(num_targ):
+        sig, alt, has_name, name, t_size, num_elem = file.unpack("<6sBi255sII")
+
+        file_offset_t = file.offset
+        for j in range(num_elem):
+            addr, e_size = file.unpack("<II")
+            data = file.read(e_size)
+            elems.append((addr, data))
+
+        if t_size != file.offset - file_offset_t:
+            raise Exception(f"corrupt DFU: {t_size} {file.offset - file_offset_t}")
+
+    if size != file.offset:
+        raise Exception("corrupt DFU: {size} {file.offset}")
+
+    file.unpack("<HHHH3sBI")
+
+    return elems
+
+
+async def main():
+    dfu_file = dfu_read(MemoryFile(0x0800_0000 + 1024 * 1024, 1024 * 1024))
+    for addr, data in dfu_file:
+        print(f"Download element 0x{addr:08x} {len(data)} bytes")
+
     if "NUCLEO-F767" in os.uname().machine:
         vbus = machine.Pin("OTG_FS_POWER", machine.Pin.OUT)
         usb_id = 0
     else:
-        vbus = machine.Pin("X1")
+        vbus = None
         usb_id = 1
 
     usbh = USBHostInterface(usb_id, vbus)
-    usbh.start()
-    for item in usbh.list():
+    await usbh.start()
+    for item in await usbh.list():
         print(f"{item.addr:02} {item.vid:04x}:{item.pid:04x} {item.product}")
 
-    for dev_addr in (2, 3):
+    for dev_addr in (2,):
         print()
         print(f"Connecting to DFU device at address {dev_addr}")
         dfu = USBDFU(usbh.get_device(dev_addr))
-        dfu.start()
-        dfu.set_addr(0x0800_0000)
-        buf = bytearray(64)
-        dfu.readinto(buf)
-        for i in range(0, len(buf), 4):
-            print(f"{struct.unpack_from('<I', buf, i)[0]:08x} ", end="")
-            if i % 16 == 12:
-                print()
-        dfu.exit()
-        dfu.stop()
+        await dfu.start()
 
-    time.sleep_ms(500)
+        if 1:
+            buf = bytearray(64)
+            await dfu.upload(0x0800_0000, buf)
+            for i in range(0, len(buf), 4):
+                print(f"{struct.unpack_from('<I', buf, i)[0]:08x} ", end="")
+                if i % 16 == 12:
+                    print()
+
+        for addr, data in dfu_file:
+            print(f"Download element 0x{addr:08x} {len(data)} bytes")
+            await dfu.download(addr, data)
+
+        await dfu.exit_dfu()
+
+    await asyncio.sleep(0.5)
     usbh.stop()
 
 
-main()
+asyncio.run(main())
