@@ -55,6 +55,7 @@
 #define MICROPY_HW_CAN2_RX          (pyb_pin_Y5)
 
 // Ethernet via RMII
+#if 0
 #define MICROPY_HW_ETH_MDC          (pyb_pin_W24)
 #define MICROPY_HW_ETH_MDIO         (pyb_pin_W15)
 #define MICROPY_HW_ETH_RMII_REF_CLK (pyb_pin_W17)
@@ -64,3 +65,4 @@
 #define MICROPY_HW_ETH_RMII_TX_EN   (pyb_pin_W8)
 #define MICROPY_HW_ETH_RMII_TXD0    (pyb_pin_W45)
 #define MICROPY_HW_ETH_RMII_TXD1    (pyb_pin_W49)
+#endif
