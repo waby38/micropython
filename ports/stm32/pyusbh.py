@@ -114,9 +114,12 @@ class USBHost:
         self.ctl_send_setup(cmd, pipe_out)
 
         urb_status = await self.wait_urb(pipe_out)
+        if urb_status == USBH_URB_NOTREADY:
+            print("setup retry")
+            urb_status = await self.wait_urb(pipe_out)
+
         if urb_status in (USBH_URB_ERROR, USBH_URB_NOTREADY):
             raise Exception(urb_status)
-            # handle CTRL_ERROR
 
         assert urb_status == USBH_URB_DONE
 
@@ -125,144 +128,54 @@ class USBHost:
         # check if there is a data stage
         if payload:
             if direction == USB_D2H:
-                # Data Direction is IN
-                # Issue an IN token
-                # phost->Control.timer = (uint16_t)phost->Timer
+                # Data Direction is IN, perform data-in
                 self.ctl_receive_data(payload, pipe_in)
                 urb_status = await self.wait_urb(pipe_in)
-
-                # check is DATA packet transferred successfully
                 if urb_status == USBH_URB_DONE:
-                    # phost->Control.state = CTRL_STATUS_OUT
-                    # print("CTRL_STATUS_OUT")
-                    # fall through to handle this
                     pass
-
-                # manage error cases*/
-                elif urb_status == USBH_URB_STALL:
-                    # In stall case, return to previous machine state
-                    status = USBH_NOT_SUPPORTED
-                    assert 0
-
-                elif urb_status == USBH_URB_ERROR:
-                    # Device error
-                    print("CTRL_ERROR")
-                    assert 0
-                    # phost->Control.state = CTRL_ERROR
+                else:
+                    assert 0, urb_status
 
             else:
-                # Data Direction is OUT
-                # case CTRL_DATA_OUT:
-
+                # Data Direction is OUT, perform data-out
                 while True:
                     self.ctl_send_data(payload, pipe_out, 1)
-                    # phost->Control.timer = (uint16_t)phost->Timer;
                     urb_status = await self.wait_urb(pipe_out, USBH_URB_STALL)
-
                     if urb_status == USBH_URB_DONE:
-                        # If the Setup Pkt is sent successful, then change the state
-                        # phost->Control.state = CTRL_STATUS_IN;
                         break
                     elif urb_status == USBH_URB_NOTREADY:
                         # NACK received from device; retry
                         pass
                     else:
                         assert 0, urb_status
-                        """
-                        # handle error cases */
-                        elif urb_status == USBH_URB_STALL:
-                        {
-                          /* In stall case, return to previous machine state*/
-                          phost->Control.state = CTRL_STALLED;
-                          status = USBH_NOT_SUPPORTED;
-
-                        }
-                        else
-                        {
-                          if (URB_Status == USBH_URB_ERROR)
-                          {
-                            /* device error */
-                            phost->Control.state = CTRL_ERROR;
-                            status = USBH_FAIL;
-
-                          }
-                        }
-                        """
 
         if direction == USB_D2H:
-            # Data Direction is IN
-            # phost->Control.state = CTRL_STATUS_OUT
-            # print("CTRL_STATUS_OUT")
-            self.ctl_send_data(None, pipe_out, True)
-            # phost->Control.timer = (uint16_t)phost->Timer;
-            urb_status = await self.wait_urb(pipe_out)
-            if urb_status == USBH_URB_DONE:
-                # complete
-                return
-            elif urb_status == USBH_URB_ERROR:
-                # phost->Control.state = CTRL_ERROR;
-                assert 0
-            else:
-                assert 0
+            # Data Direction is IN, perform ctrl-status-out
+            while True:
+                self.ctl_send_data(None, pipe_out, True)
+                urb_status = await self.wait_urb(pipe_out)
+                if urb_status == USBH_URB_DONE:
+                    # complete
+                    return
+                elif urb_status == USBH_URB_NOTREADY:
+                    # NACK received from device; retry
+                    pass
+                elif urb_status == USBH_URB_ERROR:
+                    assert 0
+                else:
+                    assert 0, urb_status
 
         else:
-            # Data Direction is OUT
-            # phost->Control.state = CTRL_STATUS_IN
-            # print("CTRL_STATUS_IN")
-            # Send 0 bytes out packet
+            # Data Direction is OUT, perform ctrl-status-in
             self.ctl_receive_data(None, pipe_in)
-
-            # phost->Control.timer = (uint16_t)phost->Timer;
-
             urb_status = await self.wait_urb(pipe_in, USBH_URB_STALL)
-
             if urb_status == USBH_URB_DONE:
                 # complete
                 return
-            elif urb_status == USBH_URB_ERROR:
-                # phost->Control.state = CTRL_ERROR;
-                assert 0
-            elif urb_status == USBH_URB_STALL:
-                # Control transfers completed, Exit the State Machine
-                raise Exception("USBH_NOT_SUPPORTED")
+            else:
+                assert 0, urb_status
 
-    """
-
-
-        case CTRL_ERROR:
-          /*
-          After a halt condition is encountered or an error is detected by the
-          host, a control endpoint is allowed to recover by accepting the next Setup
-          PID; i.e., recovery actions via some other pipe are not required for control
-          endpoints. For the Default Control Pipe, a device reset will ultimately be
-          required to clear the halt or error condition if the next Setup PID is not
-          accepted.
-          */
-          if (++phost->Control.errorcount <= USBH_MAX_ERROR_COUNT)
-          {
-            /* Do the transmission again, starting from SETUP Packet */
-            phost->Control.state = CTRL_SETUP;
-            phost->RequestState = CMD_SEND;
-          }
-          else
-          {
-            phost->pUser(phost, HOST_USER_UNRECOVERED_ERROR);
-            phost->Control.errorcount = 0U;
-            USBH_ErrLog("Control error: Device not responding");
-
-            /* Free control pipes */
-            USBH_FreePipe(phost, phost->Control.pipe_out);
-            USBH_FreePipe(phost, phost->Control.pipe_in);
-
-            phost->gState = HOST_IDLE;
-            status = USBH_FAIL;
-          }
-          break;
-
-        default:
-          break;
-      }
-    """
+    # TODO handle case of error
 
 
 class USBConnection:
@@ -285,7 +198,7 @@ class USBConnection:
     async def ctrl_transfer(self, bmRequestType, bRequest, wValue, wIndex, payload):
         wLength = len(payload) if payload else 0
         cmd = struct.pack("<BBHHH", bmRequestType, bRequest, wValue, wIndex, wLength)
-        await asyncio.wait_for(self.usbh.ctl_req(self.pipe_out, self.pipe_in, cmd, payload), 2)
+        await asyncio.wait_for(self.usbh.ctl_req(self.pipe_out, self.pipe_in, cmd, payload), 5)
         return payload
 
     async def get_descr(self, req_type, val_idx, payload):
@@ -548,22 +461,21 @@ class USBDFU:
         mv = memoryview(data)
         offset = 0
         remain = len(data)
+        progress = 0
         while remain:
-            print('x1', remain)
             await self._set_addr(addr)
-            print('x2', remain)
             l = min(self._transfer_size, remain)
-            print('x3', remain, l, offset)
             await self._dnload(2, mv[offset : offset + l])
-            print('x4', remain, l, offset)
             addr += l
             offset += l
             remain -= l
-            print(".", end="")
+            progress += 1
+            if not progress & 31:
+                print(".", end="")
 
     async def start(self):
         self._dfu_itf = 1  # TODO need to retrieve the correct itf number
-        self._transfer_size = 512
+        self._transfer_size = 128  # maximum supported by the F767
         self._memory_layout = None
         def cfg_callback(descr):
             nonlocal self
@@ -576,21 +488,14 @@ class USBDFU:
                 # DFU configuration descriptor
                 cfg = struct.unpack("<BBBHHH", descr)
                 print("DFU CFG", cfg)
-                #self._transfer_size = cfg[4]
+                self._transfer_size = min(self._transfer_size, cfg[4])
         parse_cfg_descr(self.conn.cfg_descr, cfg_callback)
         if self._memory_layout is None:
-            raise Exception("could not find DFU interface")
+            raise Exception("could not find DFU device")
         await self.conn.set_cfg()
         self._memory_layout = self.parse_memory_layout(await self.conn.get_string_descr(self._memory_layout))
-        print(self._memory_layout)
         await self._ensure_idle()
         await asyncio.sleep_ms(500)
-
-    #async def set_addr(self, addr):
-    #    await self._ensure_idle()
-    #    buf = struct.pack("<BI", 0x21, addr)
-    #    await self.dnload(0, buf)
-    #    await self._abort()
 
     async def exit_dfu(self):
         await self._ensure_idle()
@@ -631,6 +536,27 @@ class USBDFU:
             addr += l
             offset += l
             remain -= l
+
+    async def verify(self, addr, data):
+        buf = bytearray(128)
+        mv = memoryview(data)
+        offset = 0
+        remain = len(data)
+        progress = 0
+        while remain:
+            l = min(len(buf), remain)
+            await self.upload(addr, buf)
+            if l < len(buf):
+                buf = buf[:l]
+            if buf != mv[offset : offset + l]:
+                return False
+            addr += l
+            offset += l
+            remain -= l
+            progress += 1
+            if not progress & 31:
+                print(".", end="")
+        return True
 
 
 async def handle_hub(conn):
@@ -837,20 +763,34 @@ async def main():
         print()
         print(f"Connecting to DFU device at address {dev_addr}")
         dfu = USBDFU(usbh.get_device(dev_addr))
-        await dfu.start()
+        try:
+            await dfu.start()
+        except Exception as er:
+            print(f"error: {er}")
+            break
 
-        if 1:
+        if 0:
+            # Debug: dump initial flash.
             buf = bytearray(64)
-            await dfu.upload(0x0800_0000, buf)
+            await dfu.upload(0x0800_8000, buf)
             for i in range(0, len(buf), 4):
                 print(f"{struct.unpack_from('<I', buf, i)[0]:08x} ", end="")
                 if i % 16 == 12:
                     print()
 
-        for addr, data in dfu_file:
-            print(f"Download element 0x{addr:08x} {len(data)} bytes")
-            await dfu.download(addr, data)
+        if 1:
+            # Download firmware.
+            for addr, data in dfu_file:
+                print(f"Download element 0x{addr:08x} {len(data)} bytes")
+                await dfu.download(addr, data)
 
+        if 1:
+            # Verify firmware.
+            for addr, data in dfu_file:
+                print(f"Verify element 0x{addr:08x} {len(data)} bytes")
+                print(await dfu.verify(addr, data))
+
+        print("Exit DFU")
         await dfu.exit_dfu()
 
     await asyncio.sleep(0.5)
