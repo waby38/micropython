@@ -344,4 +344,10 @@ const mp_fun_table_t mp_fun_table = {
     &mp_stream_write_obj,
 };
 
+#elif MICROPY_EMIT_NATIVE && MICROPY_DYNAMIC_COMPILER
+
+// In dynamic-compiler mode eliminate dependency on entries in mp_fun_table.
+const mp_fun_table_t mp_fun_table = {
+};
+
 #endif // MICROPY_EMIT_NATIVE

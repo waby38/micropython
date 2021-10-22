@@ -56,14 +56,21 @@ user_files = {
 
     # test loading of viper and asm
     '/mod1.mpy': (
-        b'M\x05\x0a\x1f\x20' # header
+        b'M\x05\x0a\x1f' # header
+
+        b'\x02' # n_qstr
+        b'\x00' # n_obj
+        b'\x02' # n_raw_code
+
+        b'\x0emod1.py' # qstr0 = "mod1.py"
+        b'\x0aouter' # qstr1 = "outer"
 
         b'\x20' # n bytes, bytecode
-            b'\x00\x08\x02m\x02m' # prelude
+            b'\x00\x04' # prelude
+            b'\x01' # simple name (qstr index)
+            b'\x00' # line number mapping
             b'\x51' # LOAD_CONST_NONE
             b'\x63' # RETURN_VALUE
-
-            b'\x00\x02' # n_obj, n_raw_code
 
         b'\x22' # n bytes, viper code
             b'\x00\x00\x00\x00\x00\x00' # dummy machine code
@@ -78,14 +85,21 @@ user_files = {
 
     # test loading viper with additional scope flags and relocation
     '/mod2.mpy': (
-        b'M\x05\x0a\x1f\x20' # header
+        b'M\x05\x0a\x1f' # header
+
+        b'\x02' # n_qstr
+        b'\x00' # n_obj
+        b'\x01' # n_raw_code
+
+        b'\x0emod2.py' # qstr0 = "mod2.py"
+        b'\x0aouter' # qstr1 = "outer"
 
         b'\x20' # n bytes, bytecode
-            b'\x00\x08\x02m\x02m' # prelude
+            b'\x00\x04' # prelude
+            b'\x01' # simple name (qstr index)
+            b'\x00' # line number mapping
             b'\x51' # LOAD_CONST_NONE
             b'\x63' # RETURN_VALUE
-
-            b'\x00\x01' # n_obj, n_raw_code
 
         b'\x12' # n bytes(=4), viper code
             b'\x00\x00\x00\x00' # dummy machine code
