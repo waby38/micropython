@@ -65,6 +65,11 @@ static const char *_compilecode(const char *re, ByteProg *prog, int sizecode)
             for (cnt = 0; *re != ']'; re++, cnt++) {
                 if (*re == '\\') {
                     ++re;
+                    if ((*re | 0x20) == 'd' || (*re | 0x20) == 's' || (*re | 0x20) == 'w') {
+                        EMIT(PC++, 0);
+                        EMIT(PC++, *re);
+                        continue;
+                    }
                 }
                 if (!*re) return NULL;
                 EMIT(PC++, *re);

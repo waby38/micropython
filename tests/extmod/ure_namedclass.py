@@ -32,3 +32,7 @@ print_groups(m)
 
 m = re.match(r"(([0-9]*)([a-z]*)\d*)", "1234hello567")
 print_groups(m)
+
+# named class within a class set
+m = re.match("([^\s]+)\s*([^\s]+)", "1 23")
+print_groups(m)
