@@ -44,40 +44,30 @@
 #if MICROPY_PERSISTENT_CODE
 
 #define DECODE_QSTR \
-    qst = ip[0] | ip[1] << 8; \
-    ip += 2;
-#define DECODE_PTR \
     DECODE_UINT; \
-    unum = mp_showbc_const_table[unum]
-#define DECODE_OBJ \
-    DECODE_UINT; \
-    unum = mp_showbc_const_table[unum]
-
+    qst = QSTR_MAP(mp_showbc_cm, unum)
 #else
 
-#define DECODE_QSTR { \
-        qst = 0; \
-        do { \
-            qst = (qst << 7) + (*ip & 0x7f); \
-        } while ((*ip++ & 0x80) != 0); \
-}
-#define DECODE_PTR do { \
-        ip = (byte *)MP_ALIGN(ip, sizeof(void *)); \
-        unum = (uintptr_t)*(void **)ip; \
-        ip += sizeof(void *); \
-} while (0)
-#define DECODE_OBJ do { \
-        ip = (byte *)MP_ALIGN(ip, sizeof(mp_obj_t)); \
-        unum = (mp_uint_t)*(mp_obj_t *)ip; \
-        ip += sizeof(mp_obj_t); \
-} while (0)
+#define DECODE_QSTR \
+    DECODE_UINT; \
+    qst = unum;
 
 #endif
 
-const byte *mp_showbc_code_start;
-const mp_uint_t *mp_showbc_const_table;
+#define DECODE_PTR \
+    DECODE_UINT; \
+    unum = (mp_uint_t)mp_showbc_cm->const_table[unum]
+#define DECODE_OBJ \
+    DECODE_UINT; \
+    unum = (mp_uint_t)mp_showbc_cm->const_table[unum]
 
-void mp_bytecode_print(const mp_print_t *print, const void *descr, const byte *ip, mp_uint_t len, const mp_uint_t *const_table) {
+#define QSTR_MAP(table, i) (table->qstr_table[(i)])
+
+const byte * mp_showbc_code_start;
+const mp_module_context_t *mp_showbc_cm;
+
+#include "py/emitglue.h"
+void mp_bytecode_print(const mp_print_t *print, const void *descr, const byte *ip, mp_uint_t len, const mp_module_context_t *cm) {
     mp_showbc_code_start = ip;
 
     // Decode prelude
@@ -85,16 +75,13 @@ void mp_bytecode_print(const mp_print_t *print, const void *descr, const byte *i
     MP_BC_PRELUDE_SIZE_DECODE(ip);
     const byte *code_info = ip;
 
-    #if MICROPY_PERSISTENT_CODE
-    qstr block_name = code_info[0] | (code_info[1] << 8);
-    qstr source_file = code_info[2] | (code_info[3] << 8);
-    code_info += 4;
-    #else
     qstr block_name = mp_decode_uint(&code_info);
-    qstr source_file = mp_decode_uint(&code_info);
+    #if MICROPY_PERSISTENT_CODE
+    block_name = QSTR_MAP(cm, block_name);
     #endif
-    mp_printf(print, "File %s, code block '%s' (descriptor: %p, bytecode @%p " UINT_FMT " bytes)\n",
-        qstr_str(source_file), qstr_str(block_name), descr, mp_showbc_code_start, len);
+    qstr source_file = QSTR_MAP(cm, 0);
+    mp_printf(print, "File %s, code block '%s' (descriptor: %p, bytecode @%p " UINT_FMT " bytes)\n",// rct=%p\n",
+        qstr_str(source_file), qstr_str(block_name), descr, mp_showbc_code_start, len);// , ((mp_raw_code_t*)descr)->children);
 
     // raw bytecode dump
     size_t prelude_size = ip - mp_showbc_code_start + n_info + n_cell;
@@ -111,7 +98,11 @@ void mp_bytecode_print(const mp_print_t *print, const void *descr, const byte *i
     // bytecode prelude: arg names (as qstr objects)
     mp_printf(print, "arg names:");
     for (mp_uint_t i = 0; i < n_pos_args + n_kwonly_args; i++) {
-        mp_printf(print, " %s", qstr_str(MP_OBJ_QSTR_VALUE(const_table[i])));
+        qstr qst = mp_decode_uint(&code_info);
+        #if MICROPY_PERSISTENT_CODE
+        qst = QSTR_MAP(cm, qst);
+        #endif
+        mp_printf(print, " %s", qstr_str(qst));
     }
     mp_printf(print, "\n");
 
@@ -120,6 +111,7 @@ void mp_bytecode_print(const mp_print_t *print, const void *descr, const byte *i
 
     // skip over code_info
     ip += n_info;
+    const byte *line_info_top = ip;
 
     // bytecode prelude: initialise closed over variables
     for (size_t i = 0; i < n_cell; ++i) {
@@ -132,7 +124,7 @@ void mp_bytecode_print(const mp_print_t *print, const void *descr, const byte *i
         mp_int_t bc = 0;
         mp_uint_t source_line = 1;
         mp_printf(print, "  bc=" INT_FMT " line=" UINT_FMT "\n", bc, source_line);
-        for (const byte *ci = code_info; *ci;) {
+        for (const byte *ci = code_info; ci < line_info_top;) {
             if ((ci[0] & 0x80) == 0) {
                 // 0b0LLBBBBB encoding
                 bc += ci[0] & 0x1f;
@@ -147,7 +139,7 @@ void mp_bytecode_print(const mp_print_t *print, const void *descr, const byte *i
             mp_printf(print, "  bc=" INT_FMT " line=" UINT_FMT "\n", bc, source_line);
         }
     }
-    mp_bytecode_print2(print, ip, len - prelude_size, const_table);
+    mp_bytecode_print2(print, ip, len - prelude_size, cm);
 }
 
 const byte *mp_bytecode_print_str(const mp_print_t *print, const byte *ip) {
@@ -535,9 +527,9 @@ const byte *mp_bytecode_print_str(const mp_print_t *print, const byte *ip) {
     return ip;
 }
 
-void mp_bytecode_print2(const mp_print_t *print, const byte *ip, size_t len, const mp_uint_t *const_table) {
+void mp_bytecode_print2(const mp_print_t *print, const byte *ip, size_t len, const mp_module_context_t *cm) {
     mp_showbc_code_start = ip;
-    mp_showbc_const_table = const_table;
+    mp_showbc_cm = cm;
     while (ip < len + mp_showbc_code_start) {
         mp_printf(print, "%02u ", (uint)(ip - mp_showbc_code_start));
         ip = mp_bytecode_print_str(print, ip);

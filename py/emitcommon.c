@@ -30,6 +30,57 @@
 
 #if MICROPY_ENABLE_COMPILER
 
+mp_uint_t mp_emit_common_qstr_map_to_index(mp_emit_common_t *emit, qstr qst) {
+    #if MICROPY_PERSISTENT_CODE
+    #if 0
+    size_t i;
+    for (i = 0; i < emit->qstr_table_used; ++i) {
+        if (emit->qstr_table[i] == qst) {
+            break;
+        }
+    }
+    if (i == emit->qstr_table_used) {
+        if (emit->qstr_table_used >= emit->qstr_table_alloc) {
+            size_t new_alloc = emit->qstr_table_alloc + 4;
+            emit->qstr_table = m_renew(qstr_short_t, emit->qstr_table, emit->qstr_table_alloc, new_alloc);
+            emit->qstr_table_alloc = new_alloc;
+        }
+        emit->qstr_table[i] = qst;
+        // printf("pass=%d add %d=%s as %d\n", (int)emit->pass, (int)qst, qstr_str(qst), (int)i);
+        emit->qstr_table_used += 1;
+        if (emit->pass > MP_PASS_SCOPE && emit->qstr_table_used > emit->qstr_table_max) {
+            emit->qstr_table_max = emit->qstr_table_used;
+        }
+    }
+    return i;
+    #else
+    // printf("pass=%d lookup %d=%s\n", (int)emit->pass, (int)qst, qstr_str(qst));
+    mp_map_elem_t *elem = mp_map_lookup(&emit->qstr_map, MP_OBJ_NEW_QSTR(qst), MP_MAP_LOOKUP_ADD_IF_NOT_FOUND);
+    if (elem->value == MP_OBJ_NULL) {
+        assert(emit->pass == MP_PASS_SCOPE);
+        elem->value = MP_OBJ_NEW_SMALL_INT(emit->qstr_map.used - 1);
+    }
+    return MP_OBJ_SMALL_INT_VALUE(elem->value);
+    #endif
+    #else
+    return qst;
+    #endif
+}
+
+size_t mp_emit_common_alloc_const_obj(mp_emit_common_t *emit, mp_obj_t obj) {
+    if (emit->pass == MP_PASS_EMIT) {
+        emit->const_table[emit->ct_cur_obj] = (mp_uint_t)obj;
+    }
+    return emit->ct_cur_obj++;
+}
+
+size_t mp_emit_common_alloc_const_raw_code(mp_emit_common_t *emit, mp_raw_code_t *rc) {
+    if (emit->pass == MP_PASS_EMIT) {
+        emit->children[emit->ct_cur_raw_code] = rc;
+    }
+    return emit->ct_cur_raw_code++;
+}
+
 void mp_emit_common_get_id_for_modification(scope_t *scope, qstr qst) {
     // name adding/lookup
     id_info_t *id = scope_find_or_add_id(scope, qst, ID_INFO_KIND_GLOBAL_IMPLICIT);

@@ -31,9 +31,9 @@
 
 #include "py/emitglue.h"
 #include "py/objtype.h"
+#include "py/objfun.h"
 #include "py/runtime.h"
 #include "py/bc0.h"
-#include "py/bc.h"
 #include "py/profile.h"
 
 // *FORMAT-OFF*
@@ -66,32 +66,37 @@
 
 #if MICROPY_PERSISTENT_CODE
 
-#define DECODE_QSTR \
-    qstr qst = ip[0] | ip[1] << 8; \
-    ip += 2;
-#define DECODE_PTR \
-    DECODE_UINT; \
-    void *ptr = (void*)(uintptr_t)code_state->fun_bc->const_table[unum]
-#define DECODE_OBJ \
-    DECODE_UINT; \
-    mp_obj_t obj = (mp_obj_t)code_state->fun_bc->const_table[unum]
+/*
+   consider having built-in qstrs that are not looked up
+    unum = *ip++; \
+    if (unum & 0x80) {
+        qst = unum & 0x3f;
+        if (unum & 0x40) {
+            do {
+                qst = qst << 7 | *ip & 0x7f;
+            } while (*ip++ & 0x80);
+        }
+        qstr qst = ((const uint16_t *)code_state->fun_bc->mc)[unum]
+    }
+*/
 
+#define DECODE_QSTR \
+    DECODE_UINT; \
+    qstr qst = code_state->fun_bc->mc->qstr_table[unum]
 #else
 
-#define DECODE_QSTR qstr qst = 0; \
-    do { \
-        qst = (qst << 7) + (*ip & 0x7f); \
-    } while ((*ip++ & 0x80) != 0)
-#define DECODE_PTR \
-    ip = (byte*)MP_ALIGN(ip, sizeof(void*)); \
-    void *ptr = *(void**)ip; \
-    ip += sizeof(void*)
-#define DECODE_OBJ \
-    ip = (byte*)MP_ALIGN(ip, sizeof(mp_obj_t)); \
-    mp_obj_t obj = *(mp_obj_t*)ip; \
-    ip += sizeof(mp_obj_t)
+#define DECODE_QSTR \
+    DECODE_UINT; \
+    qstr qst = unum;
 
 #endif
+
+#define DECODE_PTR \
+    DECODE_UINT; \
+    void *ptr = (void *)(uintptr_t)code_state->fun_bc->raw_code_table[unum]
+#define DECODE_OBJ \
+    DECODE_UINT; \
+    mp_obj_t obj = (mp_obj_t)code_state->fun_bc->mc->const_table[unum]
 
 #define PUSH(val) *++sp = (val)
 #define POP() (*sp--)
@@ -187,6 +192,7 @@
 //  MP_VM_RETURN_YIELD, ip, sp valid, yielded value in *sp
 //  MP_VM_RETURN_EXCEPTION, exception in state[0]
 mp_vm_return_kind_t MICROPY_WRAP_MP_EXECUTE_BYTECODE(mp_execute_bytecode)(mp_code_state_t *code_state, volatile mp_obj_t inject_exc) {
+    // TODO pull out code_state->fun_bc->mc to a local variabla?
 #define SELECTIVE_EXC_IP (0)
 #if SELECTIVE_EXC_IP
 #define MARK_EXC_IP_SELECTIVE() { code_state->ip = ip; } /* stores ip 1 byte past last opcode */
@@ -859,15 +865,15 @@ unwind_jump:;
 
                 ENTRY(MP_BC_MAKE_FUNCTION): {
                     DECODE_PTR;
-                    PUSH(mp_make_function_from_raw_code(ptr, MP_OBJ_NULL, MP_OBJ_NULL));
+                    PUSH(mp_make_function_from_raw_code(ptr, code_state->fun_bc->mc, NULL));
                     DISPATCH();
                 }
 
                 ENTRY(MP_BC_MAKE_FUNCTION_DEFARGS): {
                     DECODE_PTR;
                     // Stack layout: def_tuple def_dict <- TOS
-                    mp_obj_t def_dict = POP();
-                    SET_TOP(mp_make_function_from_raw_code(ptr, TOP(), def_dict));
+                    sp -= 1;
+                    SET_TOP(mp_make_function_from_raw_code(ptr, code_state->fun_bc->mc, sp));
                     DISPATCH();
                 }
 
@@ -876,7 +882,7 @@ unwind_jump:;
                     size_t n_closed_over = *ip++;
                     // Stack layout: closed_overs <- TOS
                     sp -= n_closed_over - 1;
-                    SET_TOP(mp_make_closure_from_raw_code(ptr, n_closed_over, sp));
+                    SET_TOP(mp_make_closure_from_raw_code(ptr, code_state->fun_bc->mc, n_closed_over, sp));
                     DISPATCH();
                 }
 
@@ -885,7 +891,7 @@ unwind_jump:;
                     size_t n_closed_over = *ip++;
                     // Stack layout: def_tuple def_dict closed_overs <- TOS
                     sp -= 2 + n_closed_over - 1;
-                    SET_TOP(mp_make_closure_from_raw_code(ptr, 0x100 | n_closed_over, sp));
+                    SET_TOP(mp_make_closure_from_raw_code(ptr, code_state->fun_bc->mc, 0x100 | n_closed_over, sp));
                     DISPATCH();
                 }
 
@@ -1384,23 +1390,19 @@ unwind_loop:
                 const byte *ip = code_state->fun_bc->bytecode;
                 MP_BC_PRELUDE_SIG_DECODE(ip);
                 MP_BC_PRELUDE_SIZE_DECODE(ip);
+                const byte *line_info_top = ip + n_info;
                 const byte *bytecode_start = ip + n_info + n_cell;
-                #if !MICROPY_PERSISTENT_CODE
-                // so bytecode is aligned
-                bytecode_start = MP_ALIGN(bytecode_start, sizeof(mp_uint_t));
-                #endif
                 size_t bc = code_state->ip - bytecode_start;
-                #if MICROPY_PERSISTENT_CODE
-                qstr block_name = ip[0] | (ip[1] << 8);
-                qstr source_file = ip[2] | (ip[3] << 8);
-                ip += 4;
-                #else
                 qstr block_name = mp_decode_uint_value(ip);
-                ip = mp_decode_uint_skip(ip);
-                qstr source_file = mp_decode_uint_value(ip);
-                ip = mp_decode_uint_skip(ip);
+                for (size_t i = 0; i < 1 + n_pos_args + n_kwonly_args; ++i) {
+                    ip = mp_decode_uint_skip(ip);
+                }
+                #if MICROPY_PERSISTENT_CODE
+                // TODO use DECODE_QSTR?
+                block_name = code_state->fun_bc->mc->qstr_table[block_name];
                 #endif
-                size_t source_line = mp_bytecode_get_source_line(ip, bc);
+                qstr source_file = code_state->fun_bc->mc->qstr_table[0];
+                size_t source_line = mp_bytecode_get_source_line(ip, line_info_top, bc);
                 mp_obj_exception_add_traceback(MP_OBJ_FROM_PTR(nlr.ret_val), source_file, source_line, block_name);
             }
 

@@ -92,6 +92,28 @@ typedef enum {
 
 typedef struct _emit_t emit_t;
 
+typedef struct _mp_emit_common_t {
+    pass_kind_t pass;
+
+    #if 1 || MICROPY_PERSISTENT_CODE
+    uint16_t ct_cur_obj_base;
+    uint16_t ct_cur_obj;
+    uint16_t ct_num_obj;
+    uint16_t ct_cur_raw_code;
+    #endif
+    mp_uint_t *const_table;
+    mp_raw_code_t **children;
+
+    /*
+    qstr_short_t *qstr_table;
+    size_t qstr_table_alloc;
+    size_t qstr_table_used;
+    size_t qstr_table_max;
+    */
+
+    mp_map_t qstr_map;
+} mp_emit_common_t;
+
 typedef struct _mp_emit_method_table_id_ops_t {
     void (*local)(emit_t *emit, qstr qst, mp_uint_t local_num, int kind);
     void (*global)(emit_t *emit, qstr qst, int kind);
@@ -99,7 +121,7 @@ typedef struct _mp_emit_method_table_id_ops_t {
 
 typedef struct _emit_method_table_t {
     #if MICROPY_DYNAMIC_COMPILER
-    emit_t *(*emit_new)(mp_obj_t * error_slot, uint *label_slot, mp_uint_t max_num_labels);
+    emit_t *(*emit_new)(mp_emit_common_t * emit_common, mp_obj_t *error_slot, uint *label_slot, mp_uint_t max_num_labels);
     void (*emit_free)(emit_t *emit);
     #endif
 
@@ -161,6 +183,86 @@ typedef struct _emit_method_table_t {
     void (*end_except_handler)(emit_t *emit);
 } emit_method_table_t;
 
+static inline void mp_emit_common_init(mp_emit_common_t *emit, qstr source_file) {
+    mp_map_init(&emit->qstr_map, 1);
+    mp_map_lookup(&emit->qstr_map, MP_OBJ_NEW_QSTR(source_file), MP_MAP_LOOKUP_ADD_IF_NOT_FOUND)->value = MP_OBJ_NEW_SMALL_INT(0);
+}
+
+static inline void mp_emit_common_start_pass(mp_emit_common_t *emit, pass_kind_t pass) {
+    emit->pass = pass;
+    if (pass == MP_PASS_STACK_SIZE) {
+        emit->ct_cur_obj_base = emit->ct_cur_obj;
+    } else if (pass > MP_PASS_STACK_SIZE) {
+        emit->ct_cur_obj = emit->ct_cur_obj_base;
+    }
+    if (pass == MP_PASS_EMIT) {
+        if (emit->ct_cur_raw_code == 0) {
+            emit->children = NULL;
+        } else {
+            emit->children = m_new0(mp_raw_code_t *, emit->ct_cur_raw_code);
+        }
+    }
+    emit->ct_cur_raw_code = 0;
+}
+
+mp_uint_t mp_emit_common_qstr_map_to_index(mp_emit_common_t *emit, qstr qst);
+
+static inline void mp_emit_common_use_qstr(mp_emit_common_t *emit, qstr qst) {
+    mp_emit_common_qstr_map_to_index(emit, qst);
+}
+
+size_t mp_emit_common_alloc_const_obj(mp_emit_common_t *emit, mp_obj_t obj);
+size_t mp_emit_common_alloc_const_raw_code(mp_emit_common_t *emit, mp_raw_code_t *rc);
+
+#include "py/nativeglue.h"
+static inline void mp_emit_common_finalise(mp_emit_common_t *emit, bool has_native_code) {
+    emit->ct_cur_obj += has_native_code;
+    emit->ct_num_obj = emit->ct_cur_obj;
+    emit->const_table = m_new0(mp_uint_t, emit->ct_cur_obj);
+    emit->ct_cur_obj = has_native_code; // reserve slot 0 for &mp_fun_table
+    #if MICROPY_EMIT_NATIVE
+    if (has_native_code) {
+        // Store mp_fun_table pointer just after qstrs
+        emit->const_table[0] = (mp_uint_t)(uintptr_t)&mp_fun_table;
+    }
+    #endif
+}
+
+#include <string.h>
+static inline mp_module_context_t *mp_module_context_new(size_t n_qstr, size_t n_obj) {
+    size_t nq = (n_qstr * sizeof(qstr_short_t) + sizeof(mp_uint_t) - 1) / sizeof(mp_uint_t);
+    size_t nc = n_obj;
+    mp_module_context_t *mc = m_new_obj_var(mp_module_context_t, mp_uint_t, nq + nc);
+    mc->const_table = (mp_obj_t *)&((mp_uint_t *)&mc->qstr_table[0])[nq];
+    return mc;
+}
+static inline void mp_emit_common_create_module_context(mp_emit_common_t *emit, mp_compiled_module_t *cm) {
+    assert(emit->ct_cur_obj == emit->ct_num_obj);
+
+    size_t qstr_map_used = emit->qstr_map.used;
+    mp_module_context_t *mc = mp_module_context_new(qstr_map_used, emit->ct_cur_obj);
+    for (size_t i = 0; i < emit->qstr_map.alloc; ++i) {
+        if (mp_map_slot_is_filled(&emit->qstr_map, i)) {
+            size_t idx = MP_OBJ_SMALL_INT_VALUE(emit->qstr_map.table[i].value);
+            qstr qst = MP_OBJ_QSTR_VALUE(emit->qstr_map.table[i].key);
+            mc->qstr_table[idx] = qst;
+        }
+    }
+    memcpy(mc->const_table, emit->const_table, emit->ct_cur_obj * sizeof(mp_uint_t));
+    #if 0
+    printf("table %d\n", (int)emit->ct_cur_obj);
+    printf("  %p\n", mc->const_table[0]);
+    printf("  %p\n", mc->const_table[1]);
+    printf("  %p\n", mc->const_table[2]);
+    #endif
+
+    cm->mc = mc;
+    #if MICROPY_PERSISTENT_CODE_SAVE
+    cm->n_qstr = emit->qstr_map.used;
+    cm->n_obj = emit->ct_cur_obj;
+    #endif
+}
+
 static inline void mp_emit_common_get_id_for_load(scope_t *scope, qstr qst) {
     scope_find_or_add_id(scope, qst, ID_INFO_KIND_GLOBAL_IMPLICIT);
 }
@@ -180,13 +282,13 @@ extern const mp_emit_method_table_id_ops_t mp_emit_bc_method_table_load_id_ops;
 extern const mp_emit_method_table_id_ops_t mp_emit_bc_method_table_store_id_ops;
 extern const mp_emit_method_table_id_ops_t mp_emit_bc_method_table_delete_id_ops;
 
-emit_t *emit_bc_new(void);
-emit_t *emit_native_x64_new(mp_obj_t *error_slot, uint *label_slot, mp_uint_t max_num_labels);
-emit_t *emit_native_x86_new(mp_obj_t *error_slot, uint *label_slot, mp_uint_t max_num_labels);
-emit_t *emit_native_thumb_new(mp_obj_t *error_slot, uint *label_slot, mp_uint_t max_num_labels);
-emit_t *emit_native_arm_new(mp_obj_t *error_slot, uint *label_slot, mp_uint_t max_num_labels);
-emit_t *emit_native_xtensa_new(mp_obj_t *error_slot, uint *label_slot, mp_uint_t max_num_labels);
-emit_t *emit_native_xtensawin_new(mp_obj_t *error_slot, uint *label_slot, mp_uint_t max_num_labels);
+emit_t *emit_bc_new(mp_emit_common_t *emit_common);
+emit_t *emit_native_x64_new(mp_emit_common_t *emit_common, mp_obj_t *error_slot, uint *label_slot, mp_uint_t max_num_labels);
+emit_t *emit_native_x86_new(mp_emit_common_t *emit_common, mp_obj_t *error_slot, uint *label_slot, mp_uint_t max_num_labels);
+emit_t *emit_native_thumb_new(mp_emit_common_t *emit_common, mp_obj_t *error_slot, uint *label_slot, mp_uint_t max_num_labels);
+emit_t *emit_native_arm_new(mp_emit_common_t *emit_common, mp_obj_t *error_slot, uint *label_slot, mp_uint_t max_num_labels);
+emit_t *emit_native_xtensa_new(mp_emit_common_t *emit_common, mp_obj_t *error_slot, uint *label_slot, mp_uint_t max_num_labels);
+emit_t *emit_native_xtensawin_new(mp_emit_common_t *emit_common, mp_obj_t *error_slot, uint *label_slot, mp_uint_t max_num_labels);
 
 void emit_bc_set_max_num_labels(emit_t *emit, mp_uint_t max_num_labels);
 

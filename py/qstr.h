@@ -46,6 +46,7 @@ enum {
 };
 
 typedef size_t qstr;
+typedef uint16_t qstr_short_t;
 
 typedef struct _qstr_pool_t {
     struct _qstr_pool_t *prev;

@@ -80,9 +80,9 @@ STATIC mp_lexer_t *mp_lexer_frozen_str(const char *str, size_t len) {
 #include "py/emitglue.h"
 
 extern const char mp_frozen_mpy_names[];
-extern const mp_raw_code_t *const mp_frozen_mpy_content[];
+extern const mp_compiled_module_t *const mp_frozen_mpy_content[];
 
-STATIC const mp_raw_code_t *mp_find_frozen_mpy(const char *str, size_t len) {
+STATIC const mp_compiled_module_t *mp_find_frozen_mpy(const char *str, size_t len) {
     const char *name = mp_frozen_mpy_names;
     for (size_t i = 0; *name != 0; i++) {
         size_t l = strlen(name);
@@ -144,9 +144,9 @@ int mp_find_frozen_module(const char *str, size_t len, void **data) {
     }
     #endif
     #if MICROPY_MODULE_FROZEN_MPY
-    const mp_raw_code_t *rc = mp_find_frozen_mpy(str, len);
-    if (rc != NULL) {
-        *data = (void *)rc;
+    const mp_compiled_module_t *cm = mp_find_frozen_mpy(str, len);
+    if (cm != NULL) {
+        *data = (void *)cm;
         return MP_FROZEN_MPY;
     }
     #endif

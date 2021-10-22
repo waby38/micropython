@@ -28,7 +28,6 @@
 #define MICROPY_INCLUDED_PY_BC_H
 
 #include "py/runtime.h"
-#include "py/objfun.h"
 
 // bytecode layout:
 //
@@ -50,7 +49,9 @@
 //
 //  source info section:
 //      simple_name : var qstr
-//      source_file : var qstr
+//      argname0    : var qstr
+//      ...         : var qstr
+//      argnameN    : var qstr      N = num_pos_args + num_kwonly_args - 1
 //      <line number info>
 //
 //  closure section:
@@ -65,9 +66,6 @@
 //
 // constant table layout:
 //
-//  argname0        : obj (qstr)
-//  ...             : obj (qstr)
-//  argnameN        : obj (qstr)    N = num_pos_args + num_kwonly_args
 //  const0          : obj
 //  constN          : obj
 
@@ -182,9 +180,9 @@ typedef struct _mp_bytecode_prelude_t {
     uint n_pos_args;
     uint n_kwonly_args;
     uint n_def_pos_args;
-    qstr qstr_block_name;
-    qstr qstr_source_file;
+    qstr qstr_block_name_idx;
     const byte *line_info;
+    const byte *line_info_top;
     const byte *opcodes;
 } mp_bytecode_prelude_t;
 
@@ -198,12 +196,30 @@ typedef struct _mp_exc_stack_t {
     mp_obj_base_t *prev_exc;
 } mp_exc_stack_t;
 
+// State associated with a module, to interface bytecode with runtime.
+// Outer level struct defining a compiled module.
+typedef struct _mp_module_context_t {
+    // mp_obj_dict_t *globals; // TODO, but needs some thought with frozen code
+    mp_obj_t *const_table;
+    qstr_short_t qstr_table[];
+} mp_module_context_t;
+typedef struct _mp_compiled_module_t {
+    const struct _mp_raw_code_t *rc;
+    mp_module_context_t *mc;
+    #if MICROPY_PERSISTENT_CODE
+    // placed here, this is part of the ABI b/c native code assumes offsets of entries below
+    bool has_native;
+    size_t n_qstr;
+    size_t n_obj;
+    #endif
+} mp_compiled_module_t;
+
 typedef struct _mp_code_state_t {
     // The fun_bc entry points to the underlying function object that is being executed.
     // It is needed to access the start of bytecode and the const_table.
     // It is also needed to prevent the GC from reclaiming the bytecode during execution,
     // because the ip pointer below will always point to the interior of the bytecode.
-    mp_obj_fun_bc_t *fun_bc;
+    struct _mp_obj_fun_bc_t *fun_bc;
     const byte *ip;
     mp_obj_t *sp;
     uint16_t n_state;
@@ -229,10 +245,10 @@ const byte *mp_decode_uint_skip(const byte *ptr);
 mp_vm_return_kind_t mp_execute_bytecode(mp_code_state_t *code_state, volatile mp_obj_t inject_exc);
 mp_code_state_t *mp_obj_fun_bc_prepare_codestate(mp_obj_t func, size_t n_args, size_t n_kw, const mp_obj_t *args);
 void mp_setup_code_state(mp_code_state_t *code_state, size_t n_args, size_t n_kw, const mp_obj_t *args);
-void mp_bytecode_print(const mp_print_t *print, const void *descr, const byte *code, mp_uint_t len, const mp_uint_t *const_table);
-void mp_bytecode_print2(const mp_print_t *print, const byte *code, size_t len, const mp_uint_t *const_table);
+void mp_bytecode_print(const mp_print_t *print, const void *descr, const byte *code, mp_uint_t len, const mp_module_context_t *cm);
+void mp_bytecode_print2(const mp_print_t *print, const byte *code, size_t len, const mp_module_context_t *cm);
 const byte *mp_bytecode_print_str(const mp_print_t *print, const byte *ip);
-#define mp_bytecode_print_inst(print, code, const_table) mp_bytecode_print2(print, code, 1, const_table)
+#define mp_bytecode_print_inst(print, code, x_table) mp_bytecode_print2(print, code, 1, x_table)
 
 // Helper macros to access pointer with least significant bits holding flags
 #define MP_TAGPTR_PTR(x) ((void *)((uintptr_t)(x) & ~((uintptr_t)3)))
@@ -246,10 +262,10 @@ uint mp_opcode_format(const byte *ip, size_t *opcode_size, bool count_var_uint);
 
 #endif
 
-static inline size_t mp_bytecode_get_source_line(const byte *line_info, size_t bc_offset) {
+static inline size_t mp_bytecode_get_source_line(const byte *line_info, const byte *line_info_top, size_t bc_offset) {
     size_t source_line = 1;
-    size_t c;
-    while ((c = *line_info)) {
+    while (line_info < line_info_top) {
+        size_t c = *line_info;
         size_t b, l;
         if ((c & 0x80) == 0) {
             // 0b0LLBBBBB encoding

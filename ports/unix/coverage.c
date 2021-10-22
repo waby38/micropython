@@ -2,6 +2,7 @@
 #include <string.h>
 
 #include "py/obj.h"
+#include "py/objfun.h"
 #include "py/objstr.h"
 #include "py/runtime.h"
 #include "py/gc.h"
