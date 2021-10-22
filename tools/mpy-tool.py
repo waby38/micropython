@@ -272,6 +272,7 @@ class RawCode(object):
             rc.freeze(self.escaped_name + "_")
 
     def freeze_constants(self):
+        global const_str_content, const_int_content, const_obj_content
         # generate constant objects
         for i, obj in enumerate(self.objs):
             obj_name = "const_obj_%s_%u" % (self.escaped_name, i)
@@ -295,6 +296,8 @@ class RawCode(object):
                         "".join(("\\x%02x" % b) for b in obj),
                     )
                 )
+                const_str_content += len(obj)
+                const_obj_content += 4 * 4
             elif is_int_type(obj):
                 if config.MICROPY_LONGINT_IMPL == config.MICROPY_LONGINT_IMPL_NONE:
                     # TODO check if we can actually fit this long-int into a small-int
@@ -320,6 +323,8 @@ class RawCode(object):
                         "{.neg=%u, .fixed_dig=1, .alloc=%u, .len=%u, .dig=(uint%u_t*)(const uint%u_t[]){%s}}};"
                         % (obj_name, neg, ndigs, ndigs, bits_per_dig, bits_per_dig, digs)
                     )
+                    const_int_content += (digs.count(",") + 1) * bits_per_dig // 8
+                    const_obj_content += 4 * 4
             elif type(obj) is float:
                 print(
                     "#if MICROPY_OBJ_REPR == MICROPY_OBJ_REPR_A || MICROPY_OBJ_REPR == MICROPY_OBJ_REPR_B"
@@ -329,6 +334,7 @@ class RawCode(object):
                     % (obj_name, obj)
                 )
                 print("#endif")
+                const_obj_content += 3 * 4
             elif type(obj) is complex:
                 print(
                     "STATIC const mp_obj_complex_t %s = {{&mp_type_complex}, (mp_float_t)%.16g, (mp_float_t)%.16g};"
@@ -368,6 +374,9 @@ class RawCode(object):
             for rc in self.raw_codes:
                 print("    MP_ROM_PTR(&raw_code_%s)," % rc.escaped_name)
             print("};")
+        global const_table_qstr_content, const_table_ptr_content
+        const_table_qstr_content += len(self.qstrs)
+        const_table_ptr_content += (len(self.objs) + len(self.raw_codes))
 
     def freeze_module(self, qstr_links=(), type_sig=0):
         # generate module
@@ -416,6 +425,9 @@ class RawCode(object):
         print("    #endif")
         print("};")
 
+        global raw_code_count, raw_code_content
+        raw_code_count += 1
+        raw_code_content += 4 * 4
 
 class RawCodeBytecode(RawCode):
     def __init__(self, bytecode, qstrs, objs, raw_codes):
@@ -457,6 +469,9 @@ class RawCodeBytecode(RawCode):
 
         self.freeze_constants()
         self.freeze_module()
+
+        global bc_content
+        bc_content += len(self.bytecode)
 
 
 class RawCodeNative(RawCode):
@@ -864,6 +879,17 @@ def freeze_mpy(base_qstrs, raw_codes):
     # As in qstr.c, set so that the first dynamically allocated pool is twice this size; must be <= the len
     qstr_pool_alloc = min(len(new), 10)
 
+    global bc_content, const_str_content, const_int_content, const_obj_content, const_table_qstr_content, const_table_ptr_content, raw_code_count, raw_code_content
+    qstr_content = 0
+    bc_content = 0
+    const_str_content = 0
+    const_int_content = 0
+    const_obj_content = 0
+    const_table_qstr_content = 0
+    const_table_ptr_content = 0
+    raw_code_count = 0
+    raw_code_content = 0
+
     print()
     print("extern const qstr_pool_t mp_qstr_const_pool;")
     print("const qstr_pool_t mp_qstr_frozen_const_pool = {")
@@ -879,6 +905,7 @@ def freeze_mpy(base_qstrs, raw_codes):
                 config.MICROPY_QSTR_BYTES_IN_LEN, config.MICROPY_QSTR_BYTES_IN_HASH, qstr
             )
         )
+        qstr_content += config.MICROPY_QSTR_BYTES_IN_LEN + config.MICROPY_QSTR_BYTES_IN_HASH + len(bytes(qstr, "utf8")) + 1
     print("    },")
     print("};")
 
@@ -887,15 +914,18 @@ def freeze_mpy(base_qstrs, raw_codes):
 
     print()
     print("const char mp_frozen_mpy_names[] = {")
+    mp_frozen_mpy_names_content = 1
     for rc in raw_codes:
         module_name = rc.source_file.str
         print('"%s\\0"' % module_name)
+        mp_frozen_mpy_names_content += len(rc.source_file.str) + 1
     print('"\\0"};')
 
     print("const mp_raw_code_t *const mp_frozen_mpy_content[] = {")
     for rc in raw_codes:
         print("    &raw_code_%s," % rc.escaped_name)
     print("};")
+    mp_frozen_mpy_content_size = len(raw_codes * 4)
 
     # If a port defines MICROPY_FROZEN_LIST_ITEM then list all modules wrapped in that macro.
     print("#ifdef MICROPY_FROZEN_LIST_ITEM")
@@ -907,6 +937,22 @@ def freeze_mpy(base_qstrs, raw_codes):
             short_name = module_name[: -len(".py")]
         print('MICROPY_FROZEN_LIST_ITEM("%s", "%s")' % (short_name, module_name))
     print("#endif")
+
+    print()
+    print("/*")
+    print("byte sizes:")
+    print("qstr content: %d unique, %d bytes" % (len(new), qstr_content))
+    print("bc content: %d" % bc_content)
+    print("const str content: %d" % const_str_content)
+    print("const int content: %d" % const_int_content)
+    print("const obj content: %d" % const_obj_content)
+    print("const table qstr content: %d entries, %d bytes" % (const_table_qstr_content, const_table_qstr_content * 4))
+    print("const table ptr content: %d entries, %d bytes" % (const_table_ptr_content, const_table_ptr_content * 4))
+    print("raw code content: %d * 4 = %d" % (raw_code_count, raw_code_content))
+    print("mp_frozen_mpy_names_content: %d" % mp_frozen_mpy_names_content)
+    print("mp_frozen_mpy_content_size: %d" % mp_frozen_mpy_content_size)
+    print("total: %d" % (qstr_content + bc_content + const_str_content+const_int_content+const_obj_content+const_table_qstr_content*4+const_table_ptr_content*4+raw_code_content+mp_frozen_mpy_names_content+mp_frozen_mpy_content_size))
+    print("*/")
 
 
 def merge_mpy(raw_codes, output_file):
@@ -1001,7 +1047,7 @@ def main():
     else:
         config.MICROPY_QSTR_BYTES_IN_LEN = 1
         config.MICROPY_QSTR_BYTES_IN_HASH = 1
-        base_qstrs = {}
+        base_qstrs = list(qstrutil.static_qstr_list)
 
     raw_codes = [read_mpy(file) for file in args.files]
 
