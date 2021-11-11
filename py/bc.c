@@ -202,7 +202,11 @@ void mp_setup_code_state(mp_code_state_t *code_state, size_t n_args, size_t n_kw
             for (size_t j = 0; j < n_pos_args + n_kwonly_args; j++) {
                 qstr arg_qstr = mp_decode_uint(&arg_names);
                 #if MICROPY_PERSISTENT_CODE
-                arg_qstr = self->cm->qstr_table[arg_qstr];
+                if (arg_qstr & 1) {
+                    arg_qstr = self->cm->qstr_table[arg_qstr >> 1];
+                } else {
+                    arg_qstr >>= 1;
+                }
                 #endif
                 if (wanted_arg_name == MP_OBJ_NEW_QSTR(arg_qstr)) {
                     if (code_state->state[n_state - 1 - j] != MP_OBJ_NULL) {
@@ -258,7 +262,11 @@ void mp_setup_code_state(mp_code_state_t *code_state, size_t n_args, size_t n_kw
         for (size_t i = 0; i < n_kwonly_args; i++) {
             qstr arg_qstr = mp_decode_uint(&arg_names);
             #if MICROPY_PERSISTENT_CODE
-            arg_qstr = self->cm->qstr_table[arg_qstr];
+            if (arg_qstr & 1) {
+                arg_qstr = self->cm->qstr_table[arg_qstr >> 1];
+            } else {
+                arg_qstr >>= 1;
+            }
             #endif
             if (code_state->state[n_state - 1 - n_pos_args - i] == MP_OBJ_NULL) {
                 mp_map_elem_t *elem = NULL;

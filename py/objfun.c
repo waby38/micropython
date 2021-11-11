@@ -146,7 +146,12 @@ const mp_obj_type_t mp_type_fun_builtin_var = {
 qstr mp_obj_code_get_name(const byte *code_info, const qstr_short_t *x_table) {
     MP_BC_PRELUDE_SIZE_DECODE(code_info);
     #if MICROPY_PERSISTENT_CODE
-    return x_table[mp_decode_uint_value(code_info)];
+    mp_uint_t simple_name = mp_decode_uint_value(code_info);
+    if (simple_name & 1) {
+        return x_table[simple_name >> 1];
+    } else {
+        return simple_name >> 1;
+    }
     #else
     return mp_decode_uint_value(code_info);
     #endif

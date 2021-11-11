@@ -94,7 +94,12 @@
 
 #define DECODE_QSTR \
     DECODE_UINT; \
-    qstr qst = code_state->fun_bc->cm->qstr_table[unum]
+    qstr qst; \
+    if (unum & 1) { \
+        qst = code_state->fun_bc->cm->qstr_table[unum >> 1]; \
+    } else { \
+        qst = unum >> 1; \
+    }
 #define DECODE_PTR \
     DECODE_UINT; \
     void *ptr = (void *)(uintptr_t)code_state->fun_bc->cm->const_table[unum]
@@ -1424,7 +1429,11 @@ unwind_loop:
                 }
                 #if MICROPY_PERSISTENT_CODE
                 // TODO use DECODE_QSTR?
-                block_name = code_state->fun_bc->cm->qstr_table[block_name];
+                if (block_name & 1) {
+                    block_name = code_state->fun_bc->cm->qstr_table[block_name >> 1];
+                } else {
+                    block_name >>= 1;
+                }
                 #endif
                 qstr source_file = code_state->fun_bc->cm->qstr_table[0];
                 size_t source_line = mp_bytecode_get_source_line(ip, line_info_top, bc);

@@ -86,6 +86,11 @@ global_qstrs = [None]  # MP_QSTRnull should never be referenced
 for n in qstrutil.static_qstr_list:
     global_qstrs.append(QStrType(n))
 
+def qstr_table_lookup(table, idx):
+    if idx & 1:
+        return table[idx >> 1]
+    else:
+        return global_qstrs[idx >> 1]
 
 MP_CODE_BYTECODE = 2
 MP_CODE_NATIVE_PY = 3
@@ -689,7 +694,7 @@ class RawCodeBytecode(RawCode):
         self.bytecode = bytecode
 
         self.offset_names, self.offset_opcodes, self.offset_line_info, self.prelude, self.names = extract_prelude(self.bytecode, 0)
-        self.simple_name = self.qstr_table[self.names[0]]
+        self.simple_name = qstr_table_lookup(self.qstr_table, self.names[0])
 
         super().__init__(cm_escaped_name + "_" + self.simple_name.qstr_esc, MP_CODE_BYTECODE)
 
@@ -698,7 +703,7 @@ class RawCodeBytecode(RawCode):
         print("simple_name:", self.simple_name.str)
         print("  raw bytecode:", len(bc), hexlify_to_str(bc))
         print("  prelude:", self.prelude)
-        print("  args:", [self.qstr_table[i].str for i in self.names[1:]])
+        print("  args:", [qstr_table_lookup(self.qstr_table, i).str for i in self.names[1:]])
         print("  line info:", hexlify_to_str(bc[self.offset_line_info:self.offset_opcodes]))
         ip = self.offset_opcodes
         while ip < len(bc):
@@ -706,7 +711,7 @@ class RawCodeBytecode(RawCode):
             if bc[ip] == Opcodes.MP_BC_LOAD_CONST_OBJ:
                 arg = "%r" % self.obj_table[arg]
             if fmt == MP_BC_FORMAT_QSTR:
-                arg = self.qstr_table[arg].str
+                arg = qstr_table_lookup(self.qstr_table, arg).str
             elif fmt in (MP_BC_FORMAT_VAR_UINT, MP_BC_FORMAT_OFFSET):
                 pass
             else:
@@ -729,7 +734,7 @@ class RawCodeBytecode(RawCode):
         print("    ", end="")
         for b in bc[self.offset_names:self.offset_line_info]:
             print("0x%02x," % b, end="")
-        print(" // names: %s" % ", ".join(self.qstr_table[i].str for i in self.names))
+        print(" // names: %s" % ", ".join(qstr_table_lookup(self.qstr_table, i).str for i in self.names))
 
         print("    ", end="")
         for b in bc[self.offset_line_info:self.offset_opcodes]:
@@ -741,7 +746,7 @@ class RawCodeBytecode(RawCode):
             fmt, sz, arg = mp_opcode_decode(bc, ip)
             opcode_name = Opcodes.mapping[bc[ip]]
             if fmt == MP_BC_FORMAT_QSTR:
-                opcode_name += " " + self.qstr_table[arg].str
+                opcode_name += " " + qstr_table_lookup(self.qstr_table, arg).str
             elif fmt in (MP_BC_FORMAT_VAR_UINT, MP_BC_FORMAT_OFFSET):
                 opcode_name += " %u" % arg
             print("    %s, // %s" % (",".join("0x%02x" % b for b in bc[ip:ip + sz]), opcode_name))

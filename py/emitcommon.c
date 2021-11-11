@@ -78,12 +78,16 @@ mp_uint_t mp_emit_common_qstr_map_to_index(mp_emit_common_t *emit, qstr qst) {
     return i;
     #else
     //printf("pass=%d lookup %d=%s\n", (int)emit->pass, (int)qst, qstr_str(qst));
+    #define QSTR_LAST_STATIC MP_QSTR_zip
+    if (qst <= QSTR_LAST_STATIC) {
+        return qst << 1;
+    }
     mp_map_elem_t *elem = mp_map_lookup(&emit->qstr_map, MP_OBJ_NEW_QSTR(qst), MP_MAP_LOOKUP_ADD_IF_NOT_FOUND);
     if (elem->value == MP_OBJ_NULL) {
         assert(emit->pass == MP_PASS_SCOPE);
         elem->value = MP_OBJ_NEW_SMALL_INT(emit->qstr_map.used - 1);
     }
-    return MP_OBJ_SMALL_INT_VALUE(elem->value);
+    return MP_OBJ_SMALL_INT_VALUE(elem->value) << 1 | 1;
     #endif
     #else
     return qst;
