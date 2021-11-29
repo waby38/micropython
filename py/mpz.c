@@ -713,6 +713,7 @@ void mpz_set(mpz_t *dest, const mpz_t *src) {
 
 void mpz_set_from_int(mpz_t *z, mp_int_t val) {
     if (val == 0) {
+        z->neg = 0;
         z->len = 0;
         return;
     }
@@ -1052,7 +1053,9 @@ void mpz_neg_inpl(mpz_t *dest, const mpz_t *z) {
     if (dest != z) {
         mpz_set(dest, z);
     }
-    dest->neg = 1 - dest->neg;
+    if (dest->len) {
+        dest->neg = 1 - dest->neg;
+    }
 }
 
 /* computes dest = ~z (= -z - 1)
@@ -1125,6 +1128,9 @@ void mpz_shr_inpl(mpz_t *dest, const mpz_t *lhs, mp_uint_t rhs) {
                     // dest > 0, so can use mpn_add to add 1
                     dest->len = mpn_add(dest->dig, dest->dig, dest->len, &round_up, 1);
                 }
+            } else if (!dest->len) {
+                // Convert -0 to 0.
+                dest->neg = 0;
             }
         }
     }
@@ -1148,7 +1154,7 @@ void mpz_add_inpl(mpz_t *dest, const mpz_t *lhs, const mpz_t *rhs) {
         dest->len = mpn_sub(dest->dig, lhs->dig, lhs->len, rhs->dig, rhs->len);
     }
 
-    dest->neg = lhs->neg;
+    dest->neg = lhs->neg & !!dest->len;
 }
 
 /* computes dest = lhs - rhs
@@ -1177,6 +1183,7 @@ void mpz_sub_inpl(mpz_t *dest, const mpz_t *lhs, const mpz_t *rhs) {
     } else {
         dest->neg = lhs->neg;
     }
+    dest->neg &= !!dest->len;
 }
 
 /* computes dest = lhs & rhs
@@ -1200,7 +1207,7 @@ void mpz_and_inpl(mpz_t *dest, const mpz_t *lhs, const mpz_t *rhs) {
         mpz_need_dig(dest, lhs->len + 1);
         dest->len = mpn_and_neg(dest->dig, lhs->dig, lhs->len, rhs->dig, rhs->len,
             lhs->neg == rhs->neg, 0 != lhs->neg, 0 != rhs->neg);
-        dest->neg = lhs->neg & rhs->neg;
+        dest->neg = lhs->neg & rhs->neg & !!dest->len;
     }
 
     #else
@@ -1208,7 +1215,7 @@ void mpz_and_inpl(mpz_t *dest, const mpz_t *lhs, const mpz_t *rhs) {
     mpz_need_dig(dest, lhs->len + (lhs->neg || rhs->neg));
     dest->len = mpn_and_neg(dest->dig, lhs->dig, lhs->len, rhs->dig, rhs->len,
         (lhs->neg == rhs->neg) ? lhs->neg : 0, lhs->neg, rhs->neg);
-    dest->neg = lhs->neg & rhs->neg;
+    dest->neg = lhs->neg & rhs->neg & !!dest->len;
 
     #endif
 }
@@ -1280,7 +1287,7 @@ void mpz_xor_inpl(mpz_t *dest, const mpz_t *lhs, const mpz_t *rhs) {
     mpz_need_dig(dest, lhs->len + (lhs->neg || rhs->neg));
     dest->len = mpn_xor_neg(dest->dig, lhs->dig, lhs->len, rhs->dig, rhs->len,
         (lhs->neg != rhs->neg), 0 == lhs->neg, 0 == rhs->neg);
-    dest->neg = lhs->neg ^ rhs->neg;
+    dest->neg = (lhs->neg ^ rhs->neg) & !!dest->len;
 
     #endif
 }
@@ -1311,7 +1318,7 @@ void mpz_mul_inpl(mpz_t *dest, const mpz_t *lhs, const mpz_t *rhs) {
     if (lhs->neg == rhs->neg) {
         dest->neg = 0;
     } else {
-        dest->neg = 1;
+        dest->neg = !!dest->len;
     }
 
     mpz_free(temp);
