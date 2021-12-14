@@ -1,6 +1,6 @@
 import os
 import machine, pyb, time, select, uasyncio as asyncio, struct
-import uctypes
+import uctypes, binascii
 from collections import namedtuple
 
 EVENT_CONNECTED = 1
@@ -516,7 +516,7 @@ class USBDFU:
         await self._upload(buf)
         await self._abort()
 
-    async def download(self, addr, data):
+    async def download(self, addr, data, *, skip=0):
         for mem_i in range(len(self._memory_layout)):
             if self._memory_layout[mem_i][0] == addr:
                 break
@@ -527,17 +527,19 @@ class USBDFU:
         remain = len(data)
         while remain:
             l = min(self._memory_layout[mem_i][1], remain)
-            print("Erase 0x{:08x}".format(addr))
+            print(f"  Erase 0x{addr:08x}")
             await self._page_erase(addr)
-            print("Write 0x{:08x} {} bytes".format(addr, l), end="")
-            await self._write(addr, mv[offset : offset + l])
+            print(f"  Write 0x{addr + skip:08x} {l - skip} bytes", end="")
+            await self._write(addr + skip, mv[offset + skip : offset + l])
             print()
+            skip = 0
             mem_i += 1
             addr += l
             offset += l
             remain -= l
 
     async def verify(self, addr, data):
+        print(f"  Verify 0x{addr:08x} {len(data)} bytes", end="")
         buf = bytearray(128)
         mv = memoryview(data)
         offset = 0
@@ -549,14 +551,16 @@ class USBDFU:
             if l < len(buf):
                 buf = buf[:l]
             if buf != mv[offset : offset + l]:
-                return False
+                print("x")
+                return False, addr
             addr += l
             offset += l
             remain -= l
             progress += 1
             if not progress & 31:
                 print(".", end="")
-        return True
+        print()
+        return True, addr
 
 
 async def handle_hub(conn):
@@ -737,30 +741,56 @@ def dfu_read(file):
     if size != file.offset:
         raise Exception("corrupt DFU: {size} {file.offset}")
 
-    file.unpack("<HHHH3sBI")
+    _, _, _, _, _, _, file_crc = file.unpack("<HHHH3sBI")
+
+    crc = ~binascii.crc32(file.data[:file.offset - 4]) & 0xFFFFFFFF
+    if crc != file_crc:
+        print("CRC failed", crc, file_crc)
+        return None
 
     return elems
 
 
 async def main():
-    dfu_file = dfu_read(MemoryFile(0x0800_0000 + 1024 * 1024, 1024 * 1024))
-    for addr, data in dfu_file:
-        print(f"Download element 0x{addr:08x} {len(data)} bytes")
-
+    # Hardware config and initialisation.
     if "NUCLEO-F767" in os.uname().machine:
         vbus = machine.Pin("OTG_FS_POWER", machine.Pin.OUT)
+        vbus(1)
+        vbus = None
         usb_id = 0
     else:
         vbus = None
         usb_id = 1
 
+    # Bytes to skip programming in the firmware until the rest of the firmware is verified to have
+    # been programmed correctly.
+    FIRMWARE_VERIFY_SKIP = 8
+
+    # Load the DFU file to program.
+    DFU_ADDR = 0x0800_0000 + 1024 * 1024
+    DFU_MAX_SIZE = 1024 * 1024
+    dfu_file = dfu_read(MemoryFile(DFU_ADDR, DFU_MAX_SIZE))
+    if dfu_file is None:
+        # Loading failed.
+        return
+
+    # Print out info about the DFU file.
+    print(f"DFU loaded from memory at 0x{DFU_ADDR:08x}")
+    for addr, data in dfu_file:
+        print(f"DFU element addr=0x{addr:08x} len={len(data)}")
+    print()
+
+    # Start the USB host.
     usbh = USBHostInterface(usb_id, vbus)
     await usbh.start()
+
+    # List connected USB devices.
+    print(f"Connected USB devices:")
     for item in await usbh.list():
         print(f"{item.addr:02} {item.vid:04x}:{item.pid:04x} {item.product}")
+    print()
 
     for dev_addr in (2,):
-        print()
         print(f"Connecting to DFU device at address {dev_addr}")
         dfu = USBDFU(usbh.get_device(dev_addr))
         try:
@@ -780,17 +810,36 @@ async def main():
 
         if 1:
             # Download firmware.
+            skip = FIRMWARE_VERIFY_SKIP
             for addr, data in dfu_file:
                 print(f"Download element 0x{addr:08x} {len(data)} bytes")
-                await dfu.download(addr, data)
+                await dfu.download(addr, data, skip=skip)
+                skip = 0
+                print(f"  Download of element succeeded")
 
+        verify_element_count = 0
         if 1:
             # Verify firmware.
+            skip = FIRMWARE_VERIFY_SKIP
             for addr, data in dfu_file:
                 print(f"Verify element 0x{addr:08x} {len(data)} bytes")
-                print(await dfu.verify(addr, data))
+                verify = await dfu.verify(addr + skip, data[skip:])
+                if verify[0]:
+                    verify_element_count += 1
+                    print(f"  Verify of element succeeded")
+                else:
+                    print(f"  Verify of element failed at address 0x{verify[1]:08x}")
 
-        print("Exit DFU")
+        if verify_element_count == len(dfu_file):
+            # Write initial bytes.
+            addr, data = dfu_file[0]
+            print(f"Write to 0x{addr:08x} initial {FIRMWARE_VERIFY_SKIP} bytes")
+            await dfu._write(addr, data[:8])
+            print(f"  Write finished")
+        else:
+            print(f"Not writing initial {FIRMWARE_VERIFY_SKIP} bytes")
+
+        print("Trigger device to exit DFU")
         await dfu.exit_dfu()
 
     await asyncio.sleep(0.5)
