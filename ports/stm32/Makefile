@@ -55,8 +55,9 @@ BOOTLOADER_DFU_USB_PID ?= 0xDF11
 STFLASH ?= st-flash
 OPENOCD ?= openocd
 OPENOCD_CONFIG ?= boards/openocd_stm32f4.cfg
-STARTUP_FILE ?= lib/stm32lib/CMSIS/STM32$(MCU_SERIES_UPPER)xx/Source/Templates/gcc/startup_$(CMSIS_MCU_LOWER).o
+STARTUP_FILE ?= lib/stm32lib/CMSIS/STM32$(MCU_SERIES_UPPER)xx/Source/Templates/gcc/startup_$(CMSIS_MCU_LOWER)_cm4.o
 SYSTEM_FILE ?= lib/stm32lib/CMSIS/STM32$(MCU_SERIES_UPPER)xx/Source/Templates/system_stm32$(MCU_SERIES)xx.o
+$(info STARTUP_FILE="$(STARTUP_FILE)")
 
 # Select the cross compile prefix
 CROSS_COMPILE ?= arm-none-eabi-
@@ -387,8 +388,6 @@ HAL_SRC_C += $(addprefix $(HAL_DIR)/Src/stm32$(MCU_SERIES)xx_,\
 	hal_flash_ex.c \
 	hal_gpio.c \
 	hal_i2c.c \
-	hal_pcd.c \
-	hal_pcd_ex.c \
 	hal_pwr.c \
 	hal_pwr_ex.c \
 	hal_rcc.c \
@@ -401,6 +400,13 @@ HAL_SRC_C += $(addprefix $(HAL_DIR)/Src/stm32$(MCU_SERIES)xx_,\
 	hal_uart.c \
 	ll_utils.c \
 	)
+
+ifeq ($(MCU_SERIES),$(filter $(MCU_SERIES),f0 f4 f7 g4 h7 l0 l4 wb))
+HAL_SRC_C += $(addprefix $(HAL_DIR)/Src/stm32$(MCU_SERIES)xx_,\
+	hal_pcd.c \
+	hal_pcd_ex.c \
+	)
+endif
 
 ifeq ($(MCU_SERIES),$(filter $(MCU_SERIES),f4 f7 h7 l0 l4 wb))
 HAL_SRC_C += $(addprefix $(HAL_DIR)/Src/stm32$(MCU_SERIES)xx_,\
